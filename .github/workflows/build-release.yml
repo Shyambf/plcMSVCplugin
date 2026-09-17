@@ -1,0 +1,60 @@
+name: Build and Release VSIX
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build VSIX Package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild and Visual Studio Tools
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore NuGet Packages
+        run: dotnet restore plcMSVCplugin/plcMSVCplugin.csproj
+
+      - name: Build VSIX in Release Configuration
+        run: dotnet build plcMSVCplugin/plcMSVCplugin.csproj -c Release --no-restore
+
+      - name: Locate VSIX Package
+        id: find_vsix
+        shell: pwsh
+        run: |
+          $vsixPath = Get-ChildItem -Path plcMSVCplugin/bin/Release -Filter *.vsix -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $vsixPath -or -not (Test-Path $vsixPath)) {
+            Write-Error "VSIX package was not found in plcMSVCplugin/bin/Release!"
+            exit 1
+          }
+          Write-Host "Found VSIX package: $vsixPath"
+          "VSIX_PATH=$vsixPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlanningC-VSIX
+          path: ${{ env.VSIX_PATH }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: ${{ env.VSIX_PATH }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false

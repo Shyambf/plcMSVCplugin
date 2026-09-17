@@ -1,0 +1,83 @@
+# Инструкция по установке и тестированию плагина Planning C
+
+
+---
+
+## Совместимость
+- **Visual Studio 2022** (Community, Professional, Enterprise — версия 17.0 и выше)
+- **Visual Studio 2026** (версия 18.0 и выше)
+- Архитектура: **x64 (amd64)**
+
+---
+
+## Вариант 1. Установка из готового релиза (GitHub Releases)
+
+Этот вариант рекомендуется для повседневного использования плагина.
+
+1. Перейдите в раздел **[Releases](https://github.com/Shyambf/plcMSVCplugin/releases)** репозитория на GitHub.
+2. В последнем релизе скачайте прикрепленный файл **`PlanningC.vsix`** (или найдите его в корне репозитория).
+3. **Закройте Visual Studio**, если она запущена.
+4. Запустите скачанный файл **`PlanningC.vsix`** двойным щелчком мыши.
+5. В открывшемся окне установщика `VSIX Installer` выберите вашу версию Visual Studio (например, *Visual Studio Community 2022*) и нажмите **Install**.
+6. Дождитесь появления сообщения об успешной установке и закройте установщик.
+7. Запустите Visual Studio.
+8. Откройте любой `.cpp` файл с кодом Planning C (например, `test_samples/test_syntax.cpp` или файлы из папки примеров `Examples`).
+
+---
+
+## Вариант 2. Тестирование и сборка через Git Clone
+
+Этот вариант предназначен для разработчиков, контрибьюторов и локального тестирования.
+
+### Шаг 1. Клонирование репозитория
+Откройте терминал (PowerShell или Git Bash) и выполните:
+```bash
+git clone https://github.com/Shyambf/plcMSVCplugin.git
+cd plcMSVCplugin
+```
+
+### Шаг 2. Сборка VSIX пакета
+Сборка выполняется средствами .NET SDK без каких-либо сторонних интерпретаторов.
+
+**Способ А (через встроенный скрипт PowerShell):**
+```powershell
+.\build_vsix.ps1
+```
+
+**Способ Б (напрямую через .NET CLI):**
+```powershell
+dotnet build plcMSVCplugin/plcMSVCplugin.csproj -c Release
+```
+
+Скрипт соберет проект и скопирует готовый пакет **`PlanningC.vsix`** в корень репозитория.
+
+### Шаг 3. Установка скомпилированного пакета
+Закройте Visual Studio и запустите установку:
+```powershell
+Start-Process .\PlanningC.vsix
+```
+Или дважды кликните по файлу `PlanningC.vsix` в Проводнике Windows и нажмите **Install**.
+
+### Шаг 4. Проверка и тестирование подсветки в `.cpp`
+1. Запустите Visual Studio;
+2. Откройте готовый тестовый файл:
+   `plcMSVCplugin\test_samples\test_syntax.cpp`
+3. Убедитесь, что все ключевые конструкции Planning C корректно подсвечиваются:
+   - **Конвейеры и реентрабельность**: `reenterable`, `chain`, `throw`, `_Yield`
+   - **Функции плана**: `plan_first`, `plan_last`, `plan_empty`, `plan_group_*`, `reent_*`
+   - **Каналы и семафоры**: `funnel`, `cfunnel`, `cvar`, `csem`, `input_proc`
+   - **Виртуальные топологии**: `hypercube`, `torus`, `grid`, `ring`, `clique`, `tree`, `sun`
+   - **Встроенный Prolog и предикаты**: `@goal`, `@rule_name`, `:-`, `xpathf`, `brackets_off`
+   - **Русский язык описания программ (РЯП)**: `#(Составить программу.)`, склонения `вектор`, `матрица`, действия `ввести`, `найдем`, `поместим`
+   - **Параллелизм Cilk++**: `cilk_spawn`, `cilk_sync`, `cilk_for`
+
+---
+
+## Управление и удаление расширения
+
+В Visual Studio откройте верхнее меню:
+`Расширения` (Extensions) -> `Управление расширениями` (Manage Extensions) -> вкладка `Установленные` (Installed).
+
+Здесь вы можете:
+- **Отключить (Disable)** плагин при необходимости;
+- **Удалить (Uninstall)** плагин из системы.

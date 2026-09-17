@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="plcMSVCplugin/plcMSVCplugin.csproj">
+    <Deploy />
+  </Project>
+</Solution>
