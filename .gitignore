@@ -34,3 +34,6 @@ $RECYCLE.BIN/
 ## IDE and Editor folders
 .idea/
 .vscode/
+
+## Packages
+*.vsix

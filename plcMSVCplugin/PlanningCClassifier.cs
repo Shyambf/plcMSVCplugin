@@ -1,6 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.Language.StandardClassification;
 using Microsoft.VisualStudio.Text;
@@ -10,6 +15,94 @@ using Microsoft.VisualStudio.Utilities;
 namespace plcMSVCplugin
 {
     /// <summary>
+    /// Configuration model mapped to syntax_rules.json.
+    /// </summary>
+    [DataContract]
+    internal class SyntaxRulesConfig
+    {
+        [DataMember(Name = "keywords")]
+        public List<string> Keywords { get; set; } = new List<string>();
+
+        [DataMember(Name = "types")]
+        public List<string> Types { get; set; } = new List<string>();
+
+        [DataMember(Name = "preprocessor")]
+        public List<string> Preprocessor { get; set; } = new List<string>();
+
+        [DataMember(Name = "prologKeywords")]
+        public List<string> PrologKeywords { get; set; } = new List<string>();
+
+        [DataMember(Name = "russianTypes")]
+        public List<string> RussianTypes { get; set; } = new List<string>();
+
+        [DataMember(Name = "russianKeywords")]
+        public List<string> RussianKeywords { get; set; } = new List<string>();
+    }
+
+    /// <summary>
+    /// Loader for syntax_rules.json from VSIX output directory or assembly manifest.
+    /// </summary>
+    internal static class SyntaxRulesLoader
+    {
+        public static SyntaxRulesConfig Load()
+        {
+            // 1. Попытка прочитать файл рядом со сборкой в папке расширения
+            try
+            {
+                string? assemblyLocation = Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(assemblyLocation))
+                {
+                    string dir = Path.GetDirectoryName(assemblyLocation)!;
+                    string filePath = Path.Combine(dir, "syntax_rules.json");
+                    if (File.Exists(filePath))
+                    {
+                        using var stream = File.OpenRead(filePath);
+                        var serializer = new DataContractJsonSerializer(typeof(SyntaxRulesConfig));
+                        if (serializer.ReadObject(stream) is SyntaxRulesConfig cfg)
+                        {
+                            return cfg;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to embedded resource
+            }
+
+            // 2. Попытка прочитать из EmbeddedResource сборки
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                using var resStream = assembly.GetManifestResourceStream("plcMSVCplugin.syntax_rules.json");
+                if (resStream != null)
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(SyntaxRulesConfig));
+                    if (serializer.ReadObject(resStream) is SyntaxRulesConfig cfg)
+                    {
+                        return cfg;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to defaults
+            }
+
+            return GetDefaultFallbackConfig();
+        }
+
+        private static SyntaxRulesConfig GetDefaultFallbackConfig()
+        {
+            return new SyntaxRulesConfig
+            {
+                Keywords = new List<string> { "reenterable", "reentrant", "reent", "chain", "throw", "throw_stage", "plan_first", "plan_last", "plan_stop" },
+                Types = new List<string> { "funnel", "cvar", "markupdef", "pre_id", "topology" }
+            };
+        }
+    }
+
+    /// <summary>
     /// MEF Classifier Provider for Planning C 2.0.
     /// </summary>
     [Export(typeof(IClassifierProvider))]
@@ -18,6 +111,7 @@ namespace plcMSVCplugin
     [ContentType("c")]
     [ContentType("cpp")]
     [ContentType("code")]
+    [Order(After = Priority.High)]
     internal class PlanningCClassifierProvider : IClassifierProvider
     {
         [Import]
@@ -32,6 +126,7 @@ namespace plcMSVCplugin
 
     /// <summary>
     /// Planning C 2.0 syntax classifier for standard C/C++ files.
+    /// Tokens are loaded from syntax_rules.json.
     /// </summary>
     internal class PlanningCClassifier : IClassifier
     {
@@ -43,98 +138,85 @@ namespace plcMSVCplugin
         private readonly IClassificationType typeType;
         private readonly IClassificationType operatorType;
 
-        // Регулярное выражение синтаксиса Planning C 2.0
-        private static readonly Regex MasterTokenRegex = new Regex(
-            // 1. Комментарии
-            @"(?<comment>//.*$|/\*[\s\S]*?\*/|%.*$)|" +
+        private static readonly Regex MasterTokenRegex = BuildRegex();
 
-            // 2. Строки
-            @"(?<string>""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*')|" +
+        private static Regex BuildRegex()
+        {
+            var config = SyntaxRulesLoader.Load();
 
-            // 3. Мета-скобки РЯП #()
-            @"(?<meta_paren>#\(|\))|" +
+            string preprocPattern = BuildPreprocPattern(config.Preprocessor);
+            string ruTypePattern = BuildWordGroup("ru_type", config.RussianTypes);
+            string ruKeywordPattern = BuildWordGroup("ru_keyword", config.RussianKeywords);
+            string prologKeywordPattern = BuildWordGroup("prolog_keyword", config.PrologKeywords);
+            string typePattern = BuildWordGroup("type", config.Types);
+            string keywordPattern = BuildWordGroup("keyword", config.Keywords);
 
-            // 4. Директивы (#...)
-            @"(?<preproc>#\s*(?:" +
-            @"def_pattern|def_module|def_xpath|add_scan|scan|add_parse|parse|introduce|stop|preproc_passes|" +
-            @"pragma|include|define|undef|ifdef|ifndef|if|else|elif|endif|line|error" +
-            @")\b)|" +
+            string fullPattern =
+                // 1. Комментарии
+                @"(?<comment>//.*$|/\*[\s\S]*?\*/|%.*$)|" +
 
-            // 5. Правила Prolog (@rule)
-            @"(?<prolog_rule>@[a-zA-Z0-9_]+)|" +
+                // 2. Строки
+                @"(?<string>""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*')|" +
 
-            // 6. Типы РЯП (бирюзовый)
-            @"(?<ru_type>\b(?:" +
-            @"вектор|вектора|вектору|вектором|векторе|векторы|" +
-            @"скаляр|скаляра|скаляру|скаляром|скаляре|скаляры|" +
-            @"матрица|матрицы|матрице|матрицу|матрицей|матрицах|" +
-            @"элемент|элемента|элементу|элементом|элементе|элементы|элементов|элементам|элементами" +
-            @")\b)|" +
+                // 3. Мета-скобки РЯП #()
+                @"(?<meta_paren>#\(|\))|" +
 
-            // 7. Действия РЯП (синий)
-            @"(?<ru_keyword>\b(?:" +
-            @"Составить|составить|программу|программа|" +
-            @"Написать|написать|Определить|определить|посчитать|" +
-            @"Ввести|ввести|Введем|введем|Зададим|зададим|" +
-            @"Найдем|найдем|поместим|результат|также|минимум|максимум|" +
-            @"среднее|арифметическое|Вывести|вывести|экран|клавиатуры|" +
-            @"считать|будем|не|Тест|тест|дает" +
-            @")\b)|" +
+                // 4. Директивы (#...)
+                preprocPattern +
 
-            // 8. Ключевые слова Prolog и XPath
-            @"(?<prolog_keyword>\b(?:" +
-            @"is|fail|true|repeat|append|try_link|getidx|hyper|member|length|" +
-            @"write|nl|once|atom_concat|number_atom|retractall|assertz|predicate_property|" +
-            @"xpathf|similar|eq|gid|brackets_off|prefix_off|prune" +
-            @")\b)|" +
+                // 5. Правила Prolog (@rule)
+                @"(?<prolog_rule>@[a-zA-Z0-9_]+)|" +
 
-            // 9. Типы данных, каналы и топологии
-            @"(?<type>\b(?:" +
-            // Каналы и семафоры
-            @"funnel|cfunnel|cvar|cvar_clique|csem|csem_clique|plan_csem_t|input_proc|empty_proc|in|out|" +
-            // Типы и структуры
-            @"plan_type|plan_item_type|int_array|float_array|double_array|char_array|" +
-            @"markupdef|pre_id|state|depends|predicate|" +
-            // Топологии
-            @"topology|hypercube|torus|grid|tree|sun|ring|clique|cube|pyramide|lens|margueritte|" +
-            @"MGUA_X1X2|TModelMGUA|__Predictor|__FeedForwardNet|" +
-            // Стандартные типы C++
-            @"int|char|bool|float|double|void|short|long|unsigned|signed|size_t|function|" +
-            @"uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t|" +
-            @"string|vector|map|set|pair|tuple|iostream|ostream|istream|NodeTag|Node" +
-            @")\b)|" +
+                // 6. Типы РЯП
+                ruTypePattern +
 
-            // 10. Ключевые слова планирования и C++
-            @"(?<keyword>\b(?:" +
-            // Конвейеры и план
-            @"reenterable|reentrant|reent|chain|throw|plan_chain|plan_parallel_chain|plan_parallel_reverse|" +
-            @"throw_first|throw_last|reent_next_first|reent_next_last|plan_stop|clear_plan|clear_reent|_Yield|" +
-            @"plan_first|plan_last|plan_get_first|plan_get_last|plan_empty|" +
-            @"plan_group_first|plan_group_last|plan_group_parallelize|plan_group_vectorize|plan_group_typize|plan_group_atomize|plan_group_soft_atomize|" +
-            @"plan_register|plan_registered_barrier|plan_critical|plan_topology|plan_topology_quit|" +
-            @"plan_linear_num|plan_topology_num|plan_neighbours|plan_processor_id|plan_processors|" +
-            @"reent_first|reent_last|reent_group_first|reent_group_last|reent_group_parallelize|reent_group_soft_atomize|" +
-            @"reent_registered_barrier|reent_topology_quit|reent_linear_num|reent_topology_num|reent_neighbours|" +
-            @"reent_processor_id|reent_processors|reent_num_stages|reent_stage|" +
-            @"master|forw|input_index|set|reset|first|last|" +
-            // Параллелизм и Cilk++
-            @"cilk_spawn|cilk_sync|cilk_for|_Cilk_spawn|_Cilk_sync|_Cilk_for|" +
-            @"clustered|vectorized|typized|gpu|parallelize|sequential|parallel|reduction|" +
-            @"split_private|split_shared|split_tune|transaction_atomic|transacted|predict_|memoization|" +
-            @"goal|PARALLEL|SEQUENTIAL|" +
-            // Ключевые слова C++
-            @"auto|break|case|catch|class|const|continue|default|delete|do|else|enum|explicit|export|extern|for|friend|goto|if|inline|mutable|namespace|new|noexcept|nullptr|operator|private|protected|public|register|reinterpret_cast|return|sizeof|static|static_assert|static_cast|struct|switch|template|this|true|false|try|typedef|typeid|typename|union|using|virtual|volatile|while" +
-            @")\b)|" +
+                // 7. Действия РЯП
+                ruKeywordPattern +
 
-            // 11. Операторы Prolog
-            @"(?<prolog_op>:-|!|\|)|" +
+                // 8. Ключевые слова Prolog и XPath
+                prologKeywordPattern +
 
-            // 12. Числа
-            @"(?<number>\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b)|" +
+                // 9. Типы данных, каналы и топологии
+                typePattern +
 
-            // 13. Операторы
-            @"(?<operator><<|>>|->|::|&&|\|\||==|!=|<=|>=|\+\+|--|[+\-*/%=<>!&^~])",
-            RegexOptions.Compiled | RegexOptions.Multiline);
+                // 10. Ключевые слова планирования и C++
+                keywordPattern +
+
+                // 11. Операторы Prolog
+                @"(?<prolog_op>:-|!|\|)|" +
+
+                // 12. Числа
+                @"(?<number>\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b)|" +
+
+                // 13. Операторы
+                @"(?<operator><<|>>|->|::|&&|\|\||==|!=|<=|>=|\+\+|--|[+\-*/%=<>!&^~])";
+
+            return new Regex(fullPattern, RegexOptions.Compiled | RegexOptions.Multiline);
+        }
+
+        private static string BuildWordGroup(string groupName, IEnumerable<string>? words)
+        {
+            if (words == null) return string.Empty;
+            var list = words
+                .Where(w => !string.IsNullOrWhiteSpace(w))
+                .Select(w => Regex.Escape(w.Trim()))
+                .ToList();
+
+            if (list.Count == 0) return string.Empty;
+            return $@"(?<{groupName}>\b(?:{string.Join("|", list)})\b)|";
+        }
+
+        private static string BuildPreprocPattern(IEnumerable<string>? directives)
+        {
+            if (directives == null) return string.Empty;
+            var list = directives
+                .Where(w => !string.IsNullOrWhiteSpace(w))
+                .Select(w => Regex.Escape(w.Trim().TrimStart('#')))
+                .ToList();
+
+            if (list.Count == 0) return string.Empty;
+            return $@"(?<preproc>#\s*(?:{string.Join("|", list)})\b)|";
+        }
 
         public PlanningCClassifier(IClassificationTypeRegistryService registry)
         {
