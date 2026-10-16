@@ -50,35 +50,24 @@ reenterable ParallelTreeTraverse(Node * root, int level) {
 }
 
 // 3. Chains and Funnels (Dataflow Pipelines)
-chain Producer(funnel(out, int) * channel) {
-    int value = 42;
-    *channel = value;
-    throw_last(value);
+chain Producer(funnel(out, int) * V) {
+    int DATA = 42;
+    Sleep(500);
+    if (V->empty())
+        *V = DATA;
 }
 
-chain Consumer(funnel(in, int) * channel) {
-    int received = 0;
-    received << *channel;
-    cout << "Received: " << received << endl;
+chain Consumer(funnel(in, int) * V) {
+    int DATA = 0;
+    while (V->empty())
+        _Yield();
+    cout << "Consumer received from funnel: " << **V << endl;
 }
 
-// 4. Topologies (Hypercube, Ring, Clique, Star)
-void RunTopologyExample() {
-    plan_parallel_chain(1, Producer, Consumer);
-
-    auto star_topo = topology star[8]<int val> {
-        int id = reent_linear_num();
-        if (id == master()) {
-            for (int i = 0; i < num_slaves(); i++) {
-                this[slave(i)] << (val + i);
-            }
-        } else {
-            int task;
-            this[master()] >> task;
-            cout << "Slave " << id << " got " << task << endl;
-        }
-    };
-}
+/*
+// ============================================================================
+// Примеры метапрограммирования и РЯП для демонстрации подсветки синтаксиса:
+// ============================================================================
 
 // 5. Metaprogramming: Scanner Patterns & Prolog Deductive Modules
 #def_pattern scan_sample => make_sample_code(gid(), /root/NAME/@Value) {
@@ -103,8 +92,20 @@ void RunTopologyExample() {
 #(Найдем также максимум вектора V и поместим результат в скаляр max.)
 #(Вывести вектор V на экран.)
 #stop
+*/
 
 int main() {
-    cout << "Planning C Syntax Highlighting Test" << endl;
+    cout << "=== Planning C 2.0 Syntax Highlighting and Execution Test ===" << endl << endl;
+
+    funnel(in, int) * ch_in   = new funnel(in, int)("Channel");
+    funnel(out, int) * ch_out = new funnel(out, int)("Channel");
+
+    cout << "1. Running parallel chain (Producer -> Consumer)..." << endl;
+    plan_parallel_chain(1, Producer(ch_out), Consumer(ch_in));
+
+    cout << endl << "2. Testing reenterable plan call..." << endl;
+    ArrayWorker(5);
+
+    cout << endl << "=== Test executed successfully! ===" << endl;
     return 0;
 }

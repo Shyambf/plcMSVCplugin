@@ -1,0 +1,200 @@
+<UserControl x:Class="plcMSVCplugin.PlanInspectorControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vsshell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
+             mc:Ignorable="d"
+             d:DesignHeight="650" d:DesignWidth="850"
+             Background="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+             Foreground="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowTextBrushKey}}"
+             FontFamily="Segoe UI" FontSize="12">
+
+    <Grid Margin="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Панель управления и статуса отладчика -->
+        <Border Grid.Row="0" Margin="0,0,0,6" Padding="6" CornerRadius="3"
+                Background="{DynamicResource {x:Static vsshell:EnvironmentColors.CommandBarGradientBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Статус отладчика -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="StatusIndicator" Width="12" Height="12" Fill="#808080" Margin="0,0,6,0" />
+                    <TextBlock x:Name="StatusText" Text="Отладчик не запущен" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Кнопки действий -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="BtnStartDebug" Content="Отладка" ToolTip="Запуск отладки Planning C (Shift+Alt+F5)" Margin="3,0" Padding="6,3" Click="BtnStartDebug_Click" />
+                    <Button x:Name="BtnRunWithoutDebug" Content="Без отладки" ToolTip="Запуск Planning C без отладки в консоли (Ctrl+F5)" Margin="3,0" Padding="6,3" Click="BtnRunWithoutDebug_Click" />
+                    <Button x:Name="BtnCleanBuild" Content="Очистить .plc_build" ToolTip="Очистить промежуточные файлы сборки Planning C" Margin="3,0" Padding="6,3" Click="BtnCleanBuild_Click" />
+                    <Button x:Name="BtnRefresh" Content="Обновить" ToolTip="Обновить состояние из отладчика" Margin="3,0" Padding="6,3" Click="BtnRefresh_Click" />
+                    <CheckBox x:Name="ChkAutoRefresh" Content="Авто-обновление" ToolTip="Автоматически обновлять при остановке на точке останова" IsChecked="True" VerticalAlignment="Center" Margin="6,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Вкладки инспектора -->
+        <TabControl Grid.Row="1" Background="Transparent"
+                    BorderBrush="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBorderBrushKey}}">
+
+            <!-- Вкладка 1: Потоки и стадии -->
+            <TabItem Header="Потоки процесса (Threads)">
+                <Grid Margin="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="2*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1*" />
+                    </Grid.RowDefinitions>
+
+                    <DataGrid x:Name="GridThreads" Grid.Row="0" AutoGenerateColumns="False" IsReadOnly="True"
+                              SelectionMode="Single" SelectionChanged="GridThreads_SelectionChanged"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              Background="Transparent">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="65" />
+                            <DataGridTextColumn Header="Имя / Роль потока" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="150" />
+                            <DataGridTextColumn Header="Текущая функция" Binding="{Binding Location}" Width="2*" />
+                            <DataGridTextColumn Header="Приоритет" Binding="{Binding Priority}" Width="90" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="Gray" Margin="0,2" />
+
+                    <DockPanel Grid.Row="2">
+                        <TextBlock DockPanel.Dock="Top" Text="Стек вызовов выбранного потока:" FontWeight="SemiBold" Margin="0,0,0,4" />
+                        <ListBox x:Name="ListCallStack" Background="Transparent" FontFamily="Consolas" FontSize="11" />
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка 2: Состояние плана -->
+            <TabItem Header="Состояние плана (Plan State)">
+                <Grid Margin="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Сводная карточка состояния плана -->
+                    <Border Grid.Row="0" Margin="0,0,0,6" Padding="8" CornerRadius="4"
+                            BorderBrush="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                            BorderThickness="1"
+                            Background="{DynamicResource {x:Static vsshell:EnvironmentColors.CommandBarGradientBrushKey}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="4">
+                                <TextBlock Text="Статус выполнения плана:" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtPlanStatus" Text="План не активен" FontSize="13" FontWeight="Bold" Margin="0,2,0,4" />
+                                <TextBlock Text="Задач в очереди плана:" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtPlanTasksCount" Text="0" FontSize="13" FontWeight="Bold" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Margin="4">
+                                <TextBlock Text="Текущая стадия конвейера:" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtCurrentStage" Text="-" FontSize="13" FontWeight="Bold" Margin="0,2,0,4" />
+                                <TextBlock Text="Всего стадий (Stages):" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtTotalStages" Text="-" FontSize="13" FontWeight="Bold" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Margin="4">
+                                <TextBlock Text="Контекст процессора (ID):" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtProcessorContext" Text="-" FontSize="13" FontWeight="Bold" Margin="0,2,0,4" />
+                                <TextBlock Text="Режим параллелизма:" FontWeight="SemiBold" Foreground="Gray" />
+                                <TextBlock x:Name="TxtParallelMode" Text="-" FontSize="13" FontWeight="Bold" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Дерево элементов и очередей плана -->
+                    <GroupBox Grid.Row="1" Header="Детальная структура плана и очередей (plan_* / reent_*)">
+                        <TreeView x:Name="TreePlan" Background="Transparent" Margin="2" />
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка 3: Отображение каналов данных и переменных -->
+            <TabItem Header="Отображение содержимого (Channels &amp; Data)">
+                <Grid Margin="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="1.5*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Таблица каналов данных с содержимым буфера -->
+                    <GroupBox Grid.Row="0" Header="Каналы данных (funnel, cfunnel, cvar) и их содержимое">
+                        <DataGrid x:Name="GridFunnels" AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                                  SelectionMode="Single" SelectionChanged="GridFunnels_SelectionChanged"
+                                  Background="Transparent">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Имя канала" Binding="{Binding Name}" Width="130" />
+                                <DataGridTextColumn Header="Тип / Направление" Binding="{Binding Direction}" Width="140" />
+                                <DataGridTextColumn Header="Емкость (N)" Binding="{Binding Capacity}" Width="90" />
+                                <DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="120" />
+                                <DataGridTextColumn Header="Содержимое буфера / Значение" Binding="{Binding ContentPreview}" Width="2*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="Gray" Margin="0,2" />
+
+                    <!-- Детальный просмотр выбранного буфера -->
+                    <GroupBox Grid.Row="2" Header="Детальное содержимое выбранного канала / очереди">
+                        <TextBox x:Name="TxtBufferDetail" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"
+                                 Background="Transparent" TextWrapping="Wrap" BorderThickness="0" Margin="4"
+                                 Text="Выберите канал в таблице выше для детального просмотра его элементов." />
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка 4: Виртуальная топология -->
+            <TabItem Header="Топология (Topology)">
+                <Grid Margin="4">
+                    <StackPanel Margin="6">
+                        <TextBlock Text="Конфигурация параллельной топологии Planning C:" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <Border Padding="10" CornerRadius="4"
+                                BorderBrush="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock x:Name="TxtTopologyInfo" Text="Топология не инициализирована" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                <Separator Margin="0,6" />
+                                <TextBlock x:Name="TxtProcessorId" Text="Идентификатор процессора (plan_processor_id): -" Margin="0,2" />
+                                <TextBlock x:Name="TxtProcessorsCount" Text="Всего процессоров (plan_processors): -" Margin="0,2" />
+                                <TextBlock x:Name="TxtLinearNum" Text="Линейный номер узла (plan_linear_num): -" Margin="0,2" />
+                                <TextBlock x:Name="TxtTopologyNum" Text="Номер в топологии (plan_topology_num): -" Margin="0,2" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка 5: Журнал сборки и транслятора -->
+            <TabItem Header="Журнал сборки (Log)">
+                <TextBox x:Name="TxtLog" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         FontFamily="Consolas" FontSize="11" Background="Transparent" Foreground="LightGray"
+                         TextWrapping="Wrap" BorderThickness="0" Margin="4" />
+            </TabItem>
+
+        </TabControl>
+    </Grid>
+</UserControl>

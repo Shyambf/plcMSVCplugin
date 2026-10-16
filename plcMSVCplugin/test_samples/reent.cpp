@@ -76,10 +76,17 @@ struct DataItem {
           Result += Data[i]*Data[i];
       return Result;
     }
-    DataItem& operator += (const DataItem V2) {
+    DataItem& operator += (const DataItem &V2) {
       for (int i=0; i<sizeof(Data)/sizeof(Data[0]); i++)
           Data[i] += V2.Data[i];
       return *this;
+    }
+    friend void swap(DataItem& x, DataItem& y) {
+      for (int i=0; i<sizeof(x.Data)/sizeof(x.Data[0]); i++) {
+        double tmp = x.Data[i];
+        x.Data[i] = y.Data[i];
+        y.Data[i] = tmp;
+      }
     }
     bool operator < (DataItem &V2) {
       return length()<V2.length();
@@ -90,7 +97,7 @@ struct DataItem {
     bool operator > (DataItem &V2) {
       return length()>V2.length();
     }
-    DataItem& operator = (const DataItem V2) {
+    DataItem& operator = (const DataItem &V2) {
       memmove(Data,V2.Data,sizeof(Data));
       return *this;
     }
@@ -495,22 +502,29 @@ reenterable[ARR_SIZE] void Sum(int Start, int Incr)
 
 void qsort_incr(DataItem * a, int Left, int Right, int incr)
 {
- DataItem p,buf;
- int i,j;
- i=Left;
- j=Right;
- p=a[(int)((Left+Right)/incr)/2*incr];
+ if (Left >= Right || incr <= 0) return;
+
+ int mid = Left + ((Right - Left) / incr / 2) * incr;
+ double p_len = a[mid].length();
+ int i = Left;
+ int j = Right;
+
  do {
-   while (a[i]<p) i+=incr;
-   while (p<a[j]) j-=incr;
-   if (i<=j)
+   while (a[i].length() < p_len) i += incr;
+   while (p_len < a[j].length()) j -= incr;
+   if (i <= j)
       {
-       buf=a[i]; a[i]=a[j]; a[j]=buf;
-       i+=incr; j-=incr;
+       if (i < j)
+          {
+           swap(a[i], a[j]);
+          }
+       i += incr; 
+       j -= incr;
       }
- } while (i<=j);
- if (Left<j) qsort_incr(a,Left,j,incr);
- if (i<Right) qsort_incr(a,i,Right,incr);
+ } while (i <= j);
+
+ if (Left < j) qsort_incr(a, Left, j, incr);
+ if (i < Right) qsort_incr(a, i, Right, incr);
 }
 
 #define MAX_PROCS 256

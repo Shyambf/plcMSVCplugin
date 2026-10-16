@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+
+  <Commands package="guidPlcPackage">
+    <Groups>
+      <!-- Группа в меню "Отладка" (Debug) -->
+      <Group guid="guidPlcCmdSet" id="PlanningCDebugMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_DEBUG"/>
+      </Group>
+
+      <!-- Группа на панели инструментов (Toolbar) -->
+      <Group guid="guidPlcCmdSet" id="PlanningCToolbarGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_TOOL_STANDARD"/>
+      </Group>
+
+      <!-- Группа в контекстном меню редактора кода (Right-Click) -->
+      <Group guid="guidPlcCmdSet" id="PlanningCEditorContextMenuGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <!-- Кнопка 1: Запуск отладки Planning C -->
+      <Button guid="guidPlcCmdSet" id="cmdidStartPlanningCDebug" priority="0x0100" type="Button">
+        <Parent guid="guidPlcCmdSet" id="PlanningCDebugMenuGroup"/>
+        <Strings>
+          <ButtonText>Запуск отладки Planning C</ButtonText>
+          <ToolTipText>Транслировать и запустить отладку текущего файла Planning C (Shift+Alt+F5)</ToolTipText>
+        </Strings>
+      </Button>
+
+      <!-- Кнопка 2: Открыть Инспектор плана и потоков -->
+      <Button guid="guidPlcCmdSet" id="cmdidOpenPlanInspector" priority="0x0105" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1"/>
+        <Strings>
+          <ButtonText>Инспектор плана и потоков Planning C</ButtonText>
+        </Strings>
+      </Button>
+
+      <!-- Кнопка 3: Запуск без отладки Planning C (Ctrl+F5) -->
+      <Button guid="guidPlcCmdSet" id="cmdidRunPlanningC" priority="0x0101" type="Button">
+        <Parent guid="guidPlcCmdSet" id="PlanningCDebugMenuGroup"/>
+        <Strings>
+          <ButtonText>Запуск Planning C без отладки</ButtonText>
+          <ToolTipText>Транслировать, скомпилировать и запустить текущий файл Planning C без отладчика (Ctrl+F5)</ToolTipText>
+        </Strings>
+      </Button>
+
+      <!-- Кнопка 4: Очистить файлы сборки Planning C (.plc_build) -->
+      <Button guid="guidPlcCmdSet" id="cmdidCleanPlcBuild" priority="0x0103" type="Button">
+        <Parent guid="guidPlcCmdSet" id="PlanningCDebugMenuGroup"/>
+        <Strings>
+          <ButtonText>Очистить файлы сборки Planning C (.plc_build)</ButtonText>
+          <ToolTipText>Удалить сгенерированные файлы C++, .exe, .pdb и .obj в подпапке .plc_build</ToolTipText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <!-- Привязка команд к панели инструментов и контекстному меню редактора -->
+  <CommandPlacements>
+    <!-- Отладка -->
+    <CommandPlacement guid="guidPlcCmdSet" id="cmdidStartPlanningCDebug" priority="0x0100">
+      <Parent guid="guidPlcCmdSet" id="PlanningCToolbarGroup"/>
+    </CommandPlacement>
+    <CommandPlacement guid="guidPlcCmdSet" id="cmdidStartPlanningCDebug" priority="0x0100">
+      <Parent guid="guidPlcCmdSet" id="PlanningCEditorContextMenuGroup"/>
+    </CommandPlacement>
+
+    <!-- Запуск без отладки -->
+    <CommandPlacement guid="guidPlcCmdSet" id="cmdidRunPlanningC" priority="0x0101">
+      <Parent guid="guidPlcCmdSet" id="PlanningCToolbarGroup"/>
+    </CommandPlacement>
+    <CommandPlacement guid="guidPlcCmdSet" id="cmdidRunPlanningC" priority="0x0101">
+      <Parent guid="guidPlcCmdSet" id="PlanningCEditorContextMenuGroup"/>
+    </CommandPlacement>
+
+    <!-- Очистить файлы сборки -->
+    <CommandPlacement guid="guidPlcCmdSet" id="cmdidCleanPlcBuild" priority="0x0103">
+      <Parent guid="guidPlcCmdSet" id="PlanningCEditorContextMenuGroup"/>
+    </CommandPlacement>
+  </CommandPlacements>
+
+  <!-- Горячие клавиши -->
+  <KeyBindings>
+    <!-- Shift+Alt+F5: Запуск отладки Planning C -->
+    <KeyBinding guid="guidPlcCmdSet" id="cmdidStartPlanningCDebug"
+                editor="guidVSStd97" key1="VK_F5" mod1="Shift Alt"/>
+    <!-- Ctrl+F5: Запуск Planning C без отладки -->
+    <KeyBinding guid="guidPlcCmdSet" id="cmdidRunPlanningC"
+                editor="guidVSStd97" key1="VK_F5" mod1="Control"/>
+  </KeyBindings>
+
+  <Symbols>
+    <GuidSymbol name="guidPlcPackage" value="{85b3e7d6-09cd-4249-82da-621c5de9eca6}" />
+
+    <GuidSymbol name="guidPlcCmdSet" value="{298516d5-a337-4bf7-bfeb-433a08892f25}">
+      <IDSymbol name="PlanningCDebugMenuGroup" value="0x1020" />
+      <IDSymbol name="PlanningCToolbarGroup" value="0x1021" />
+      <IDSymbol name="PlanningCEditorContextMenuGroup" value="0x1022" />
+      <IDSymbol name="cmdidStartPlanningCDebug" value="0x0100" />
+      <IDSymbol name="cmdidOpenPlanInspector" value="0x0101" />
+      <IDSymbol name="cmdidRunPlanningC" value="0x0102" />
+      <IDSymbol name="cmdidCleanPlcBuild" value="0x0103" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

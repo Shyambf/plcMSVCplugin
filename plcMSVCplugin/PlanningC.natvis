@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <!-- Planning C 2.0 Natvis Visualizers -->
+
+  <!-- Funnel Base / Pointer Container -->
+  <Type Name="__funnel">
+    <DisplayString Condition="Name.size() &gt; 0">Funnel: {Name,s} (State={(int)State}, Refs={Refs})</DisplayString>
+    <DisplayString>Funnel (State={(int)State}, Refs={Refs})</DisplayString>
+    <Expand>
+      <Item Name="Name">Name</Item>
+      <Item Name="State">(int)State</Item>
+      <Item Name="Refs">Refs</Item>
+      <Item Name="useLU">useLU</Item>
+    </Expand>
+  </Type>
+
+  <!-- Typed Funnel (_funnel<Type>) -->
+  <Type Name="_funnel&lt;*&gt;">
+    <DisplayString Condition="Name.size() &gt; 0">Funnel: {Name,s} [Capacity={N}]</DisplayString>
+    <DisplayString>Funnel [Capacity={N}]</DisplayString>
+    <Expand>
+      <Item Name="[Capacity]">N</Item>
+      <Item Name="[Name]">Name</Item>
+      <Item Name="[State]">(int)State</Item>
+      <Item Name="[Refs]">Refs</Item>
+      <ArrayItems>
+        <Size>N</Size>
+        <ValuePointer>Data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- Funneled In Channel (funnel(in, Type)) -->
+  <Type Name="funneled_in&lt;*&gt;">
+    <DisplayString Condition="Ref != 0">{*Ref}</DisplayString>
+    <DisplayString>funnel_in (Unconnected)</DisplayString>
+    <Expand>
+      <ExpandedItem Condition="Ref != 0">*Ref</ExpandedItem>
+    </Expand>
+  </Type>
+
+  <!-- Funneled Out Channel (funnel(out, Type)) -->
+  <Type Name="funneled_out&lt;*&gt;">
+    <DisplayString Condition="Ref != 0">{*Ref}</DisplayString>
+    <DisplayString>funnel_out (Unconnected)</DisplayString>
+    <Expand>
+      <ExpandedItem Condition="Ref != 0">*Ref</ExpandedItem>
+    </Expand>
+  </Type>
+
+  <!-- Circular Funnel (cfunnel) -->
+  <Type Name="__cfunnel">
+    <DisplayString>Circular Funnel (State={(int)State}, Refs={Refs})</DisplayString>
+    <Expand>
+      <Item Name="State">(int)State</Item>
+      <Item Name="Refs">Refs</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="cfunneled_in&lt;*&gt;">
+    <DisplayString Condition="Ref != 0">cfunnel_in: {*Ref}</DisplayString>
+    <DisplayString>cfunnel_in (Unconnected)</DisplayString>
+    <Expand>
+      <Item Condition="Ref != 0" Name="Ref">*Ref</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="cfunneled_out&lt;*&gt;">
+    <DisplayString Condition="Ref != 0">cfunnel_out: {*Ref}</DisplayString>
+    <DisplayString>cfunnel_out (Unconnected)</DisplayString>
+    <Expand>
+      <Item Condition="Ref != 0" Name="Ref">*Ref</Item>
+    </Expand>
+  </Type>
+
+  <!-- Reentrant List / Plan Queue -->
+  <Type Name="reent_list&lt;*&gt;">
+    <DisplayString>reent_list [Size={N}]</DisplayString>
+    <Expand>
+      <Item Name="[Size]">N</Item>
+      <LinkedListItems>
+        <Size>N</Size>
+        <HeadPointer>Begin</HeadPointer>
+        <NextPointer>Next</NextPointer>
+        <Value>Data</Value>
+      </LinkedListItems>
+    </Expand>
+  </Type>
+
+  <!-- Virtual Topology Visualizers -->
+  <Type Name="__Topology">
+    <DisplayString>Topology [Nodes={Nodes.size()}, Groups={Groups.size()}, Clustered={clustered}]</DisplayString>
+    <Expand>
+      <Item Name="[Nodes Count]">Nodes.size()</Item>
+      <Item Name="[Groups Count]">Groups.size()</Item>
+      <Item Name="[Barrier]">Barrier</Item>
+      <Item Name="[Clustered]">clustered</Item>
+      <Item Name="[Exited]">exited</Item>
+      <Item Name="Nodes">Nodes</Item>
+      <Item Name="Groups">Groups</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="__Node">
+    <DisplayString>Node [ID={id}]</DisplayString>
+    <Expand>
+      <Item Name="ID">id</Item>
+      <Item Name="Plan">Plan</Item>
+      <Item Name="Barriered">barriered</Item>
+    </Expand>
+  </Type>
+
+  <!-- TVar / TChannel -->
+  <Type Name="TVar">
+    <DisplayString>TVar (Value={Val})</DisplayString>
+    <Expand>
+      <Item Name="Value">Val</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="TChannel">
+    <DisplayString>TChannel</DisplayString>
+  </Type>
+
+</AutoVisualizer>

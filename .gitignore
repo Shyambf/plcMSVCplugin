@@ -14,6 +14,12 @@
 [Rr]elease/
 x64/
 x86/
+.plc_build/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.idb
 
 ## VSIX build artifacts
 *.vsixmanifest.pkgdef
