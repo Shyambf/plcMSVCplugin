@@ -74,7 +74,9 @@ Start-Process .\PlanningC.vsix
 ### Шаг 5. Запуск и отладка примеров
 В репозиторий включены готовые к запуску и отладке примеры:
 - `plcMSVCplugin\test_samples\simple_conveyor.cpp` — параллельный конвейер с обменом данными через каналы `funnel(in, int)` и `funnel(out, int)`;
-- `plcMSVCplugin\test_samples\simple_fibb.cpp` — вычисление чисел Фибоначчи с автоматической мемоизацией `#pragma memoization(i)`.
+- `plcMSVCplugin\test_samples\simple_fibb.cpp` — вычисление чисел Фибоначчи с автоматической мемоизацией `#pragma memoization(i)`;
+- `plcMSVCplugin\test_samples\reent.cpp` — построение и обход дерева с планированием задач (`PutTree`, `plan_first`), просмотр плана в табличном виде и пошаговая отладка;
+- `plcMSVCplugin\test_samples\reent_while_else.cpp` — развертывание дедуктивного макроса (`while_else`), установка точек останова и пошаговая трассировка.
 
 **Способы запуска:**
 1. **Запуск без отладки (`Ctrl+F5`):**

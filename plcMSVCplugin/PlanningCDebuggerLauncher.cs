@@ -318,29 +318,56 @@ namespace plcMSVCplugin
             // Постобработка директив #line в сгенерированном C++ файле:
             // 1. Исключаем ссылки на виртуальные внутренние буферы (PATTERN[...], while_else(...), make_...), чтобы PDB содержал только реальный исходный код.
             // 2. Заменяем временные расширения .bak на оригинальный исходный файл (.cpp).
-            // 3. Исключаем директивы #line перед изолированными ключевыми словами 'else', чтобы исключить ложные остановы отладчика на F10.
-            // 4. Нормализуем слэши на '/', чтобы исключить искажение путей escape-символами (\r, \t, \n).
+            // 3. Сопоставляем инструкции внутри развернутых макросов (например while_else) с реальными строками sourceFile (cin >>, break, k++), чтобы на них ставились и срабатывали точки останова.
+            // 4. Изолируем последующие синтетические вспомогательные процедуры (__soft_atomic_, __atomic_) через '#line 1 "planning_c_internal.h"', чтобы адрес возврата из _call_ не «проваливался» в следующую процедуру (RecursivePutTree).
+            // 5. Расставляем явный '#line' перед первым исполняемым оператором тела планируемой процедуры (после __dummy_counter += 713;), чтобы отладчик не перескакивал операторы первого условия (if (*Cur)).
+            // 6. Нормализуем слэши на '/', чтобы исключить искажение путей escape-символами (\r, \t, \n).
             await Task.Run(() =>
             {
                 try
                 {
                     string[] rawLines = File.ReadAllLines(translatedCpp);
-                    var cleanLines = new System.Collections.Generic.List<string>(rawLines.Length);
+                    string[] srcLines = File.Exists(sourceFile) ? File.ReadAllLines(sourceFile) : Array.Empty<string>();
+
+                    // Карта строк исходного кода для привязки инструкций внутри развернутых макросов к реальным строкам файла
+                    var srcLineMap = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+                    var ignoredTrivial = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
+                    {
+                        "{", "}", "return 0;", "return 1;", "return;", "return true;", "return false;",
+                        "break;", "continue;", "else"
+                    };
+
+                    for (int sIdx = 0; sIdx < srcLines.Length; sIdx++)
+                    {
+                        string sTrim = srcLines[sIdx].Trim();
+                        if (sTrim.Length > 2 && !sTrim.StartsWith("//") && !sTrim.StartsWith("/*") && !sTrim.StartsWith("#"))
+                        {
+                            if (!ignoredTrivial.Contains(sTrim) && !srcLineMap.ContainsKey(sTrim))
+                            {
+                                srcLineMap[sTrim] = sIdx + 1;
+                            }
+                        }
+                    }
+
+                    var cleanLines = new System.Collections.Generic.List<string>(rawLines.Length + 100);
                     string normalizedSourceFile = Path.GetFullPath(sourceFile).Replace('\\', '/');
                     string sourceFileNameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile);
+
+                    bool inCallFunc = false;
+                    int callFuncFirstLine = 0;
 
                     for (int i = 0; i < rawLines.Length; i++)
                     {
                         string line = rawLines[i];
+                        string lineTrim = line.Trim();
+
+                        if (lineTrim.StartsWith("void _call_", StringComparison.Ordinal) && !lineTrim.EndsWith(";"))
+                        {
+                            inCallFunc = true;
+                        }
+
                         if (line.StartsWith("#line ", StringComparison.Ordinal))
                         {
-                            if (line.IndexOf("PATTERN[", StringComparison.Ordinal) >= 0 ||
-                                line.IndexOf("while_else", StringComparison.Ordinal) >= 0 ||
-                                line.IndexOf("make_", StringComparison.Ordinal) >= 0)
-                            {
-                                continue;
-                            }
-
                             int firstQuote = line.IndexOf('"');
                             int lastQuote = line.LastIndexOf('"');
                             if (firstQuote >= 0 && lastQuote > firstQuote)
@@ -349,47 +376,80 @@ namespace plcMSVCplugin
                                 string pathPart = line.Substring(firstQuote + 1, lastQuote - firstQuote - 1).Replace('\\', '/');
                                 string suffix = line.Substring(lastQuote);
 
-                                // Исключаем макро-вызовы со скобками и переносами строк
-                                if (pathPart.IndexOf('(') >= 0 || pathPart.IndexOf(')') >= 0 ||
+                                // Исключаем виртуальные буферы и макросы внутри кавычек
+                                if (pathPart.StartsWith("PATTERN[", StringComparison.OrdinalIgnoreCase) ||
+                                    pathPart.StartsWith("while_else(", StringComparison.OrdinalIgnoreCase) ||
+                                    pathPart.StartsWith("make_", StringComparison.OrdinalIgnoreCase) ||
+                                    pathPart.IndexOf('(') >= 0 || pathPart.IndexOf(')') >= 0 ||
                                     pathPart.IndexOf('[') >= 0 || pathPart.IndexOf(']') >= 0 ||
                                     pathPart.IndexOf('\n') >= 0 || pathPart.IndexOf('\r') >= 0)
                                 {
                                     continue;
                                 }
 
-                                // Заменяем ссылки на .bak на реальный исходник
+                                // Заменяем ссылки на .bak или временные имена на реальный исходник
                                 if (pathPart.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    string pathFileNameNoExt = Path.GetFileNameWithoutExtension(pathPart);
-                                    if (string.Equals(pathFileNameNoExt, sourceFileNameWithoutExt, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        pathPart = normalizedSourceFile;
-                                    }
-                                    else
-                                    {
-                                        string cppCandidate = pathPart.Substring(0, pathPart.Length - 4) + Path.GetExtension(sourceFile);
-                                        pathPart = File.Exists(cppCandidate) ? cppCandidate : normalizedSourceFile;
-                                    }
+                                    pathPart = normalizedSourceFile;
                                 }
 
-                                // Исключаем #line перед изолированными 'else' для корректной трассировки ветвлений
-                                int nextIdx = i + 1;
-                                while (nextIdx < rawLines.Length && string.IsNullOrWhiteSpace(rawLines[nextIdx]))
+                                string pathFileNameNoExt = Path.GetFileNameWithoutExtension(pathPart);
+                                if (string.Equals(pathFileNameNoExt, sourceFileNameWithoutExt, StringComparison.OrdinalIgnoreCase))
                                 {
-                                    nextIdx++;
+                                    pathPart = normalizedSourceFile;
                                 }
-                                if (nextIdx < rawLines.Length)
+
+                                // Отслеживаем номер строки начала функции _call_
+                                if (inCallFunc && callFuncFirstLine == 0)
                                 {
-                                    string nextTrim = rawLines[nextIdx].TrimStart();
-                                    if (nextTrim.StartsWith("else", StringComparison.Ordinal) || nextTrim.StartsWith("} else", StringComparison.Ordinal) || nextTrim.StartsWith("auto _plan_", StringComparison.Ordinal) || nextTrim.StartsWith("auto plan_", StringComparison.Ordinal) || nextTrim.StartsWith("auto _clear_plan", StringComparison.Ordinal))
+                                    string[] parts = prefix.Trim().Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                    if (parts.Length >= 2 && int.TryParse(parts[1], out int lineNum))
                                     {
-                                        continue;
+                                        callFuncFirstLine = lineNum;
                                     }
                                 }
 
                                 cleanLines.Add(prefix + pathPart + suffix);
                                 continue;
                             }
+                            else
+                            {
+                                cleanLines.Add(line);
+                                continue;
+                            }
+                        }
+
+                        // Точка перед первым исполняемым оператором процедуры (после lambda-инициализаций)
+                        if (inCallFunc && line.Contains("__dummy_counter += 713;"))
+                        {
+                            cleanLines.Add(line);
+                            if (callFuncFirstLine > 0)
+                            {
+                                cleanLines.Add($"#line {callFuncFirstLine + 1} \"{normalizedSourceFile}\"");
+                            }
+                            continue;
+                        }
+
+                        // Выход из процедуры _call_: изолируем последующие служебные функции (__soft_atomic_, __atomic_)
+                        if (inCallFunc && line.StartsWith("}", StringComparison.Ordinal))
+                        {
+                            cleanLines.Add(line);
+                            inCallFunc = false;
+                            callFuncFirstLine = 0;
+                            cleanLines.Add("#line 1 \"planning_c_internal.h\"");
+                            continue;
+                        }
+
+                        // Если оператор внутри макроса точно совпадает со строкой пользовательского кода, восстанавливаем директиву #line
+                        if (srcLineMap.TryGetValue(lineTrim, out int mappedSourceLine))
+                        {
+                            string expectedDirective = $"#line {mappedSourceLine} \"{normalizedSourceFile}\"";
+                            if (cleanLines.Count == 0 || cleanLines[cleanLines.Count - 1] != expectedDirective)
+                            {
+                                cleanLines.Add(expectedDirective);
+                            }
+                            cleanLines.Add(line);
+                            continue;
                         }
 
                         cleanLines.Add(line);
