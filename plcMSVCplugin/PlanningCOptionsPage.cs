@@ -33,7 +33,7 @@ namespace plcMSVCplugin
         [Category(CategoryGeneral)]
         [DisplayName("Флаги компилятора C++")]
         [Description("Параметры компилятора MSVC cl.exe для сборки отладочной версии.")]
-        public string CompilerFlags { get; set; } = "/EHsc /openmp /std:c++14 /Zi /Od /MDd /F8388608";
+        public string CompilerFlags { get; set; } = "/EHsc /openmp /std:c++17 /Zi /Od /MDd /F8388608";
 
         [Category(CategoryGeneral)]
         [DisplayName("Таймаут транслятора (сек)")]

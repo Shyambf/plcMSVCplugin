@@ -316,19 +316,26 @@ namespace plcMSVCplugin
             }
 
             // Постобработка директив #line в сгенерированном C++ файле:
-            // 1. Исключаем ссылки на виртуальные внутренние буферы (PATTERN[...], make_...), чтобы PDB содержал только реальный исходный код.
-            // 2. Нормализуем слэши на '/', чтобы исключить искажение путей escape-символами (\r, \t, \n).
+            // 1. Исключаем ссылки на виртуальные внутренние буферы (PATTERN[...], while_else(...), make_...), чтобы PDB содержал только реальный исходный код.
+            // 2. Заменяем временные расширения .bak на оригинальный исходный файл (.cpp).
+            // 3. Исключаем директивы #line перед изолированными ключевыми словами 'else', чтобы исключить ложные остановы отладчика на F10.
+            // 4. Нормализуем слэши на '/', чтобы исключить искажение путей escape-символами (\r, \t, \n).
             await Task.Run(() =>
             {
                 try
                 {
                     string[] rawLines = File.ReadAllLines(translatedCpp);
                     var cleanLines = new System.Collections.Generic.List<string>(rawLines.Length);
-                    foreach (string line in rawLines)
+                    string normalizedSourceFile = Path.GetFullPath(sourceFile).Replace('\\', '/');
+                    string sourceFileNameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile);
+
+                    for (int i = 0; i < rawLines.Length; i++)
                     {
+                        string line = rawLines[i];
                         if (line.StartsWith("#line ", StringComparison.Ordinal))
                         {
                             if (line.IndexOf("PATTERN[", StringComparison.Ordinal) >= 0 ||
+                                line.IndexOf("while_else", StringComparison.Ordinal) >= 0 ||
                                 line.IndexOf("make_", StringComparison.Ordinal) >= 0)
                             {
                                 continue;
@@ -341,6 +348,45 @@ namespace plcMSVCplugin
                                 string prefix = line.Substring(0, firstQuote + 1);
                                 string pathPart = line.Substring(firstQuote + 1, lastQuote - firstQuote - 1).Replace('\\', '/');
                                 string suffix = line.Substring(lastQuote);
+
+                                // Исключаем макро-вызовы со скобками и переносами строк
+                                if (pathPart.IndexOf('(') >= 0 || pathPart.IndexOf(')') >= 0 ||
+                                    pathPart.IndexOf('[') >= 0 || pathPart.IndexOf(']') >= 0 ||
+                                    pathPart.IndexOf('\n') >= 0 || pathPart.IndexOf('\r') >= 0)
+                                {
+                                    continue;
+                                }
+
+                                // Заменяем ссылки на .bak на реальный исходник
+                                if (pathPart.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string pathFileNameNoExt = Path.GetFileNameWithoutExtension(pathPart);
+                                    if (string.Equals(pathFileNameNoExt, sourceFileNameWithoutExt, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        pathPart = normalizedSourceFile;
+                                    }
+                                    else
+                                    {
+                                        string cppCandidate = pathPart.Substring(0, pathPart.Length - 4) + Path.GetExtension(sourceFile);
+                                        pathPart = File.Exists(cppCandidate) ? cppCandidate : normalizedSourceFile;
+                                    }
+                                }
+
+                                // Исключаем #line перед изолированными 'else' для корректной трассировки ветвлений
+                                int nextIdx = i + 1;
+                                while (nextIdx < rawLines.Length && string.IsNullOrWhiteSpace(rawLines[nextIdx]))
+                                {
+                                    nextIdx++;
+                                }
+                                if (nextIdx < rawLines.Length)
+                                {
+                                    string nextTrim = rawLines[nextIdx].TrimStart();
+                                    if (nextTrim.StartsWith("else", StringComparison.Ordinal) || nextTrim.StartsWith("} else", StringComparison.Ordinal) || nextTrim.StartsWith("auto _plan_", StringComparison.Ordinal) || nextTrim.StartsWith("auto plan_", StringComparison.Ordinal) || nextTrim.StartsWith("auto _clear_plan", StringComparison.Ordinal))
+                                    {
+                                        continue;
+                                    }
+                                }
+
                                 cleanLines.Add(prefix + pathPart + suffix);
                                 continue;
                             }
@@ -362,16 +408,28 @@ namespace plcMSVCplugin
             {
                 try
                 {
-                    string incParam = !string.IsNullOrEmpty(includeDir) ? $"/I\"{includeDir}\"" : "";
+                    var incList = new System.Collections.Generic.List<string>();
+                    if (!string.IsNullOrEmpty(includeDir) && Directory.Exists(includeDir)) incList.Add($"/I\"{includeDir}\"");
+                    if (!string.IsNullOrEmpty(translatorDir) && Directory.Exists(translatorDir) && !string.Equals(includeDir, translatorDir, StringComparison.OrdinalIgnoreCase)) incList.Add($"/I\"{translatorDir}\"");
+                    string incParam = string.Join(" ", incList);
                     string compilerFlags = options.CompilerFlags;
+                    if (compilerFlags.Contains("/std:c++14"))
+                    {
+                        compilerFlags = compilerFlags.Replace("/std:c++14", "/std:c++17");
+                    }
+                    else if (!compilerFlags.Contains("/std:c++17") && !compilerFlags.Contains("/std:c++20") && !compilerFlags.Contains("/std:c++latest"))
+                    {
+                        compilerFlags += " /std:c++17";
+                    }
                     if (!compilerFlags.Contains("/F") && !compilerFlags.Contains("/STACK"))
                     {
                         compilerFlags += " /F8388608";
                     }
 
+                    string openClLibParam = File.Exists(Path.Combine(translatorDir, "OpenCL.lib")) ? $" /link /LIBPATH:\"{translatorDir}\" OpenCL.lib" : "";
                     string compileCmd = !string.IsNullOrEmpty(vcvarsBat)
-                        ? $"call \"{vcvarsBat}\" > nul && cl.exe {compilerFlags} {incParam} \"{translatedCpp}\" /Fe\"{targetExe}\" /Fd\"{targetPdb}\""
-                        : $"cl.exe {compilerFlags} {incParam} \"{translatedCpp}\" /Fe\"{targetExe}\" /Fd\"{targetPdb}\"";
+                        ? $"call \"{vcvarsBat}\" > nul && cl.exe {compilerFlags} {incParam} \"{translatedCpp}\" /Fe\"{targetExe}\" /Fd\"{targetPdb}\"{openClLibParam}"
+                        : $"cl.exe {compilerFlags} {incParam} \"{translatedCpp}\" /Fe\"{targetExe}\" /Fd\"{targetPdb}\"{openClLibParam}";
 
                     var psi = new System.Diagnostics.ProcessStartInfo
                     {

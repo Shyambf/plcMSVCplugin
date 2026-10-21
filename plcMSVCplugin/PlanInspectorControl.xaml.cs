@@ -33,6 +33,16 @@ namespace plcMSVCplugin
         public string DetailText { get; set; } = "";
     }
 
+    public class PlanTaskItemModel
+    {
+        public int Index { get; set; }
+        public string TargetFunction { get; set; } = "";
+        public string Parameters { get; set; } = "";
+        public string ValuesPreview { get; set; } = "";
+        public string Flags { get; set; } = "";
+        public string Details { get; set; } = "";
+    }
+
     /// <summary>
     /// Interaction logic for PlanInspectorControl.xaml
     /// Регулирует отображение: потоков отладки, содержимого каналов данных и состояния выполнения плана.
@@ -41,6 +51,7 @@ namespace plcMSVCplugin
     {
         private readonly ObservableCollection<ThreadItemModel> _threads = new ObservableCollection<ThreadItemModel>();
         private readonly ObservableCollection<FunnelItemModel> _funnels = new ObservableCollection<FunnelItemModel>();
+        private readonly ObservableCollection<PlanTaskItemModel> _planTasks = new ObservableCollection<PlanTaskItemModel>();
         private readonly ObservableCollection<string> _callStack = new ObservableCollection<string>();
 
         public PlanInspectorControl()
@@ -48,6 +59,7 @@ namespace plcMSVCplugin
             InitializeComponent();
             GridThreads.ItemsSource = _threads;
             GridFunnels.ItemsSource = _funnels;
+            GridPlanTasks.ItemsSource = _planTasks;
             ListCallStack.ItemsSource = _callStack;
         }
 
@@ -244,6 +256,14 @@ namespace plcMSVCplugin
             }
         }
 
+        private void GridPlanTasks_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (GridPlanTasks.SelectedItem is PlanTaskItemModel item)
+            {
+                TxtTaskDetail.Text = item.Details;
+            }
+        }
+
         /// <summary>
         /// Обновление визуального состояния при переходе отладчика в режим останова или выполнения.
         /// </summary>
@@ -278,6 +298,7 @@ namespace plcMSVCplugin
             _threads.Clear();
             _callStack.Clear();
             _funnels.Clear();
+            _planTasks.Clear();
             TreePlan.Items.Clear();
 
             TxtPlanStatus.Text = "План не активен";
@@ -288,6 +309,7 @@ namespace plcMSVCplugin
             TxtParallelMode.Text = "-";
 
             TxtBufferDetail.Text = "Выберите канал в таблице выше для детального просмотра его элементов.";
+            TxtTaskDetail.Text = "Выберите задачу в таблице выше для детального просмотра её параметров.";
             TxtTopologyInfo.Text = "Топология не инициализирована";
             TxtProcessorId.Text = "Идентификатор процессора (plan_processor_id): -";
             TxtProcessorsCount.Text = "Всего процессоров (plan_processors): -";
@@ -359,6 +381,8 @@ namespace plcMSVCplugin
 
             // 2. Инспекция состояния плана (стадии, очереди, статус выполнения)
             TreePlan.Items.Clear();
+            _planTasks.Clear();
+            TxtTaskDetail.Text = "Выберите задачу в таблице выше для детального просмотра её параметров.";
             try
             {
                 // Проверка текущей стадии
@@ -378,20 +402,6 @@ namespace plcMSVCplugin
                 }
                 string totalStagesVal = (expNumStages != null && expNumStages.IsValidValue) ? expNumStages.Value : "1";
                 TxtTotalStages.Text = totalStagesVal;
-
-                // Очередь задач плана (__event_list__ / _events_...)
-                DteExpression expListN = dte.Debugger.GetExpression("__event_list__->N", false, 500);
-                int tasksCount = 0;
-                if (expListN != null && expListN.IsValidValue && int.TryParse(expListN.Value, out int nVal))
-                {
-                    tasksCount = nVal;
-                }
-                TxtPlanTasksCount.Text = tasksCount.ToString();
-
-                DteExpression expPlanEmpty = dte.Debugger.GetExpression("plan_empty()", false, 500);
-                bool isEmpty = tasksCount == 0 || (expPlanEmpty != null && expPlanEmpty.IsValidValue && (expPlanEmpty.Value == "true" || expPlanEmpty.Value == "1"));
-
-                TxtPlanStatus.Text = isEmpty ? "Очередь плана пуста (Все задачи выполнены)" : $"План активен ({tasksCount} задач в очереди)";
 
                 // Процессорный контекст
                 DteExpression expProcId = dte.Debugger.GetExpression("_reent_processor_id", false, 500);
@@ -420,14 +430,279 @@ namespace plcMSVCplugin
                 DteExpression expTopoNum = dte.Debugger.GetExpression("plan_topology_num()", false, 500);
                 if (expTopoNum != null && expTopoNum.IsValidValue) TxtTopologyNum.Text = $"Номер в топологии (plan_topology_num): {expTopoNum.Value}";
 
-                // Формирование дерева плана
+                // 2.1 Определение активной процедуры Planning C по стеку вызовов
+                string activeProc = "";
+                string queueExpr = "";
+                bool isPointerQueue = false;
+
+                if (dte.Debugger.CurrentThread?.StackFrames != null)
+                {
+                    foreach (StackFrame frame in dte.Debugger.CurrentThread.StackFrames)
+                    {
+                        string fn = frame.FunctionName ?? "";
+                        int idxCall = fn.IndexOf("_call_", StringComparison.Ordinal);
+                        if (idxCall >= 0)
+                        {
+                            string c = fn.Substring(idxCall + 6);
+                            int paren = c.IndexOf('(');
+                            if (paren >= 0) c = c.Substring(0, paren);
+                            activeProc = c.Trim();
+                            break;
+                        }
+                        int idxDunder = fn.IndexOf("__", StringComparison.Ordinal);
+                        if (idxDunder >= 0)
+                        {
+                            string c = fn.Substring(idxDunder + 2);
+                            int endDunder = c.IndexOf("__", StringComparison.Ordinal);
+                            if (endDunder > 0)
+                            {
+                                c = c.Substring(0, endDunder);
+                                if (!c.Equals("atomic", StringComparison.OrdinalIgnoreCase) &&
+                                    !c.Equals("soft_atomic", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    activeProc = c.Trim();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Поиск очереди среди локальных переменных (Locals)
+                if (dte.Debugger.CurrentStackFrame?.Locals != null)
+                {
+                    foreach (DteExpression local in dte.Debugger.CurrentStackFrame.Locals)
+                    {
+                        string lName = local.Name ?? "";
+                        string lType = local.Type ?? "";
+                        if (lName == "__event_list__")
+                        {
+                            queueExpr = "__event_list__";
+                            isPointerQueue = true;
+                            break;
+                        }
+                        if (lName.StartsWith("_events_") || lType.Contains("circular_list"))
+                        {
+                            queueExpr = lName;
+                            isPointerQueue = lType.Contains("*");
+                            if (string.IsNullOrEmpty(activeProc))
+                            {
+                                string pName = lName.Replace("_events_", "").Replace("__LOC__", "");
+                                if (!string.IsNullOrEmpty(pName)) activeProc = pName;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Попытка проверки стандартных имен очередей
+                if (string.IsNullOrEmpty(queueExpr))
+                {
+                    if (!string.IsNullOrEmpty(activeProc))
+                    {
+                        string[] candidateQueues = new[]
+                        {
+                            "__event_list__",
+                            $"_events_{activeProc}",
+                            $"_events_{activeProc}__LOC__",
+                            $"__events_{activeProc}__LOC__"
+                        };
+                        foreach (string cand in candidateQueues)
+                        {
+                            DteExpression tExp = dte.Debugger.GetExpression(cand, false, 500);
+                            if (tExp != null && tExp.IsValidValue)
+                            {
+                                queueExpr = cand;
+                                isPointerQueue = tExp.Type?.Contains("*") == true;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        DteExpression tExp = dte.Debugger.GetExpression("__event_list__", false, 500);
+                        if (tExp != null && tExp.IsValidValue)
+                        {
+                            queueExpr = "__event_list__";
+                            isPointerQueue = true;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrEmpty(activeProc))
+                {
+                    activeProc = "PutTree";
+                }
+
+                // 2.2 Чтение характеристик кольцевой очереди circular_list (Begin, End, N)
+                int tasksCount = 0;
+                int queueBegin = 0;
+                int queueEnd = 0;
+                int queueCap = 0;
+
+                if (!string.IsNullOrEmpty(queueExpr))
+                {
+                    string op = isPointerQueue ? "->" : ".";
+                    DteExpression expBegin = dte.Debugger.GetExpression($"{queueExpr}{op}Begin", false, 500);
+                    DteExpression expEnd = dte.Debugger.GetExpression($"{queueExpr}{op}End", false, 500);
+                    DteExpression expN = dte.Debugger.GetExpression($"{queueExpr}{op}N", false, 500);
+
+                    if (expBegin != null && expBegin.IsValidValue && int.TryParse(expBegin.Value, out int bVal) &&
+                        expEnd != null && expEnd.IsValidValue && int.TryParse(expEnd.Value, out int eVal) &&
+                        expN != null && expN.IsValidValue && int.TryParse(expN.Value, out int nCap) && nCap > 0)
+                    {
+                        queueBegin = bVal;
+                        queueEnd = eVal;
+                        queueCap = nCap;
+                        tasksCount = (queueEnd - queueBegin + queueCap) % queueCap;
+                    }
+                    else
+                    {
+                        DteExpression expSize = dte.Debugger.GetExpression($"{queueExpr}{op}size()", false, 500);
+                        if (expSize != null && expSize.IsValidValue && int.TryParse(expSize.Value, out int sVal))
+                        {
+                            tasksCount = sVal;
+                            queueCap = 11;
+                        }
+                    }
+                }
+
+                TxtPlanTasksCount.Text = tasksCount.ToString();
+                DteExpression expPlanEmpty = dte.Debugger.GetExpression("plan_empty()", false, 500);
+                bool isEmpty = tasksCount == 0 || (expPlanEmpty != null && expPlanEmpty.IsValidValue && (expPlanEmpty.Value == "true" || expPlanEmpty.Value == "1"));
+                TxtPlanStatus.Text = isEmpty ? "Очередь плана пуста (Все задачи выполнены)" : $"План активен ({tasksCount} задач в очереди)";
+
+                // 2.3 Извлечение элементов плана и заполнение DataGrid / PlanTasks
+                if (tasksCount > 0 && !string.IsNullOrEmpty(queueExpr) && queueCap > 0)
+                {
+                    string op = isPointerQueue ? "->" : ".";
+                    for (int i = 0; i < tasksCount; i++)
+                    {
+                        int slot = (queueBegin + i) % queueCap;
+                        string itemExpr = $"{queueExpr}{op}Data[{slot}]";
+                        DteExpression expItem = dte.Debugger.GetExpression(itemExpr, false, 500);
+
+                        DteExpression expFlags = dte.Debugger.GetExpression($"{itemExpr}.Flags", false, 500);
+                        string flagsVal = (expFlags != null && expFlags.IsValidValue) ? expFlags.Value : "0";
+                        string flagsDesc = flagsVal == "1" ? "Маркер параллелизма"
+                                         : flagsVal == "0" ? "Обычная задача"
+                                         : $"Флаги: {flagsVal}";
+
+                        var sbParams = new StringBuilder();
+                        var sbPreview = new StringBuilder();
+                        var sbDetails = new StringBuilder();
+
+                        sbDetails.AppendLine($"Задача плана #{i + 1} (Слот очереди: Data[{slot}])");
+                        sbDetails.AppendLine($"Целевая процедура: {activeProc}");
+                        sbDetails.AppendLine($"Статус / Флаги: {flagsDesc} (0x{flagsVal})");
+                        sbDetails.AppendLine("--- Параметры вызова ---");
+
+                        bool membersFound = false;
+                        if (expItem != null && expItem.DataMembers != null && expItem.DataMembers.Count > 0)
+                        {
+                            foreach (DteExpression member in expItem.DataMembers)
+                            {
+                                string mName = member.Name ?? "";
+                                if (string.IsNullOrEmpty(mName) || mName == "Flags") continue;
+                                membersFound = true;
+                                string mVal = member.Value ?? "";
+                                string mType = member.Type ?? "";
+
+                                sbDetails.AppendLine($"  {mType} {mName} = {mVal}");
+                                sbParams.Append($"{mName}={mVal}; ");
+
+                                if (mType.Contains("*") && mVal != "0x0000000000000000" && mVal != "0x00000000" && mVal != "0x0" && !mVal.Contains("NULL"))
+                                {
+                                    if (mType.Contains("**"))
+                                    {
+                                        DteExpression deref1 = dte.Debugger.GetExpression($"*{itemExpr}.{mName}", false, 500);
+                                        if (deref1 != null && deref1.IsValidValue)
+                                        {
+                                            sbDetails.AppendLine($"    *{mName} -> {deref1.Value}");
+                                            DteExpression dataDeref = dte.Debugger.GetExpression($"(*{itemExpr}.{mName})->Data", false, 500);
+                                            if (dataDeref != null && dataDeref.IsValidValue)
+                                            {
+                                                sbDetails.AppendLine($"    (*{mName})->Data = {dataDeref.Value}");
+                                                sbPreview.Append($"*{mName}->Data={dataDeref.Value}; ");
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        DteExpression dataDeref = dte.Debugger.GetExpression($"{itemExpr}.{mName}->Data", false, 500);
+                                        if (dataDeref != null && dataDeref.IsValidValue)
+                                        {
+                                            sbDetails.AppendLine($"    {mName}->Data = {dataDeref.Value}");
+                                            sbPreview.Append($"{mName}->Data={dataDeref.Value}; ");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!membersFound || sbParams.Length == 0)
+                        {
+                            DteExpression expCur = dte.Debugger.GetExpression($"{itemExpr}.Cur", false, 500);
+                            DteExpression expIns = dte.Debugger.GetExpression($"{itemExpr}.Ins", false, 500);
+                            if (expCur != null && expCur.IsValidValue)
+                            {
+                                string cVal = expCur.Value;
+                                sbParams.Append($"Cur={cVal}; ");
+                                sbDetails.AppendLine($"  TreeNode ** Cur = {cVal}");
+                                DteExpression dCur = dte.Debugger.GetExpression($"*{itemExpr}.Cur", false, 500);
+                                if (dCur != null && dCur.IsValidValue)
+                                {
+                                    sbDetails.AppendLine($"    *Cur -> {dCur.Value}");
+                                    DteExpression dCurData = dte.Debugger.GetExpression($"(*{itemExpr}.Cur)->Data", false, 500);
+                                    if (dCurData != null && dCurData.IsValidValue)
+                                    {
+                                        sbDetails.AppendLine($"    (*Cur)->Data = {dCurData.Value}");
+                                        sbPreview.Append($"*Cur->Data={dCurData.Value}; ");
+                                    }
+                                }
+                            }
+                            if (expIns != null && expIns.IsValidValue)
+                            {
+                                string iVal = expIns.Value;
+                                sbParams.Append($"Ins={iVal}; ");
+                                sbDetails.AppendLine($"  TreeNode * Ins = {iVal}");
+                                DteExpression dInsData = dte.Debugger.GetExpression($"{itemExpr}.Ins->Data", false, 500);
+                                if (dInsData != null && dInsData.IsValidValue)
+                                {
+                                    sbDetails.AppendLine($"    Ins->Data = {dInsData.Value}");
+                                    sbPreview.Append($"Ins->Data={dInsData.Value}; ");
+                                }
+                            }
+                        }
+
+                        string finalParams = sbParams.Length > 0 ? sbParams.ToString().TrimEnd() : (expItem?.Value ?? $"Слот #{slot}");
+                        string finalPreview = sbPreview.Length > 0 ? sbPreview.ToString().TrimEnd() : (expItem?.Value ?? "-");
+
+                        var taskItem = new PlanTaskItemModel
+                        {
+                            Index = i + 1,
+                            TargetFunction = activeProc,
+                            Parameters = finalParams,
+                            ValuesPreview = finalPreview,
+                            Flags = flagsDesc,
+                            Details = sbDetails.ToString()
+                        };
+                        _planTasks.Add(taskItem);
+                    }
+
+                    if (_planTasks.Count > 0)
+                    {
+                        GridPlanTasks.SelectedIndex = 0;
+                    }
+                }
+
+                // 2.4 Формирование иерархического дерева плана (TreePlan)
                 var nodePlan = new TreeViewItem
                 {
                     Header = $"Состояние плана: {TxtPlanStatus.Text} [Стадия {currentStageVal}/{totalStagesVal}]",
                     IsExpanded = true,
                     FontWeight = FontWeights.Bold
                 };
-
                 nodePlan.Items.Add(new TreeViewItem { Header = $"Текущая стадия конвейера: #{currentStageVal} (всего стадий: {totalStagesVal})" });
                 nodePlan.Items.Add(new TreeViewItem { Header = $"Задач ожидает исполнения в очереди: {tasksCount}" });
                 nodePlan.Items.Add(new TreeViewItem { Header = $"Режим исполнения: {TxtParallelMode.Text}" });
@@ -436,26 +711,30 @@ namespace plcMSVCplugin
 
                 var nodeQueue = new TreeViewItem
                 {
-                    Header = $"Очереди задач плана (__event_list__): {tasksCount} задач",
+                    Header = $"Очередь задач плана ({(!string.IsNullOrEmpty(queueExpr) ? queueExpr : "__event_list__")}): {tasksCount} задач",
                     IsExpanded = true
                 };
 
-                if (tasksCount > 0)
+                if (_planTasks.Count > 0)
                 {
-                    for (int i = 0; i < Math.Min(tasksCount, 10); i++)
+                    foreach (var task in _planTasks)
                     {
-                        DteExpression expTaskItem = dte.Debugger.GetExpression($"__event_list__->Begin[{i}].Data", false, 500);
-                        string itemStr = (expTaskItem != null && expTaskItem.IsValidValue) ? expTaskItem.Value : $"Задача #{i + 1}";
-                        nodeQueue.Items.Add(new TreeViewItem { Header = $"[Задача {i + 1}]: {itemStr}" });
-                    }
-                    if (tasksCount > 10)
-                    {
-                        nodeQueue.Items.Add(new TreeViewItem { Header = $"... еще {tasksCount - 10} задач в очереди" });
+                        var taskNode = new TreeViewItem
+                        {
+                            Header = $"[Задача {task.Index}]: {task.TargetFunction} ({task.Parameters})",
+                            IsExpanded = false
+                        };
+                        if (!string.IsNullOrEmpty(task.ValuesPreview) && task.ValuesPreview != "-")
+                        {
+                            taskNode.Items.Add(new TreeViewItem { Header = $"Данные (Data): {task.ValuesPreview}" });
+                        }
+                        taskNode.Items.Add(new TreeViewItem { Header = $"Статус / Флаги: {task.Flags}" });
+                        nodeQueue.Items.Add(taskNode);
                     }
                 }
                 else
                 {
-                    nodeQueue.Items.Add(new TreeViewItem { Header = "(Очередь задач пуста, ожидание генерации throw / plan_first)" });
+                    nodeQueue.Items.Add(new TreeViewItem { Header = "(Очередь задач пуста, ожидание планирования plan_first / plan_last / throw)" });
                 }
                 TreePlan.Items.Add(nodeQueue);
             }
