@@ -543,13 +543,13 @@ namespace plcMSVCplugin
                 if (!string.IsNullOrEmpty(queueExpr))
                 {
                     string op = isPointerQueue ? "->" : ".";
-                    DteExpression expBegin = dte.Debugger.GetExpression($"{queueExpr}{op}Begin", false, 500);
-                    DteExpression expEnd = dte.Debugger.GetExpression($"{queueExpr}{op}End", false, 500);
-                    DteExpression expN = dte.Debugger.GetExpression($"{queueExpr}{op}N", false, 500);
+                    DteExpression expBegin = SafeGetExpression(dte, $"{queueExpr}{op}Begin", 500);
+                    DteExpression expEnd = SafeGetExpression(dte, $"{queueExpr}{op}End", 500);
+                    DteExpression expN = SafeGetExpression(dte, $"{queueExpr}{op}N", 500);
 
-                    if (expBegin != null && expBegin.IsValidValue && int.TryParse(expBegin.Value, out int bVal) &&
-                        expEnd != null && expEnd.IsValidValue && int.TryParse(expEnd.Value, out int eVal) &&
-                        expN != null && expN.IsValidValue && int.TryParse(expN.Value, out int nCap) && nCap > 0)
+                    if (expBegin != null && expBegin.IsValidValue && TryParseIntFlexible(expBegin.Value, out int bVal) &&
+                        expEnd != null && expEnd.IsValidValue && TryParseIntFlexible(expEnd.Value, out int eVal) &&
+                        expN != null && expN.IsValidValue && TryParseIntFlexible(expN.Value, out int nCap) && nCap > 0)
                     {
                         queueBegin = bVal;
                         queueEnd = eVal;
@@ -558,141 +558,179 @@ namespace plcMSVCplugin
                     }
                     else
                     {
-                        DteExpression expSize = dte.Debugger.GetExpression($"{queueExpr}{op}size()", false, 500);
-                        if (expSize != null && expSize.IsValidValue && int.TryParse(expSize.Value, out int sVal))
+                        DteExpression expSize = SafeGetExpression(dte, $"{queueExpr}{op}size()", 500);
+                        if (expSize != null && expSize.IsValidValue && TryParseIntFlexible(expSize.Value, out int sVal))
                         {
                             tasksCount = sVal;
-                            queueCap = 11;
+                            queueCap = 33;
                         }
                     }
                 }
 
                 TxtPlanTasksCount.Text = tasksCount.ToString();
-                DteExpression expPlanEmpty = dte.Debugger.GetExpression("plan_empty()", false, 500);
+                DteExpression expPlanEmpty = SafeGetExpression(dte, "plan_empty()", 500);
                 bool isEmpty = tasksCount == 0 || (expPlanEmpty != null && expPlanEmpty.IsValidValue && (expPlanEmpty.Value == "true" || expPlanEmpty.Value == "1"));
                 TxtPlanStatus.Text = isEmpty ? "Очередь плана пуста (Все задачи выполнены)" : $"План активен ({tasksCount} задач в очереди)";
 
                 // 2.3 Извлечение элементов плана и заполнение DataGrid / PlanTasks
-                if (tasksCount > 0 && !string.IsNullOrEmpty(queueExpr) && queueCap > 0)
+                if (tasksCount > 0 && !string.IsNullOrEmpty(queueExpr))
                 {
                     string op = isPointerQueue ? "->" : ".";
+                    int effectiveCap = queueCap > 0 ? queueCap : 33;
                     for (int i = 0; i < tasksCount; i++)
                     {
-                        int slot = (queueBegin + i) % queueCap;
-                        string itemExpr = $"{queueExpr}{op}Data[{slot}]";
-                        DteExpression expItem = dte.Debugger.GetExpression(itemExpr, false, 500);
-
-                        DteExpression expFlags = dte.Debugger.GetExpression($"{itemExpr}.Flags", false, 500);
-                        string flagsVal = (expFlags != null && expFlags.IsValidValue) ? expFlags.Value : "0";
-                        string flagsDesc = flagsVal == "1" ? "Маркер параллелизма"
-                                         : flagsVal == "0" ? "Обычная задача"
-                                         : $"Флаги: {flagsVal}";
-
-                        var sbParams = new StringBuilder();
-                        var sbPreview = new StringBuilder();
-                        var sbDetails = new StringBuilder();
-
-                        sbDetails.AppendLine($"Задача плана #{i + 1} (Слот очереди: Data[{slot}])");
-                        sbDetails.AppendLine($"Целевая процедура: {activeProc}");
-                        sbDetails.AppendLine($"Статус / Флаги: {flagsDesc} (0x{flagsVal})");
-                        sbDetails.AppendLine("--- Параметры вызова ---");
-
-                        bool membersFound = false;
-                        if (expItem != null && expItem.DataMembers != null && expItem.DataMembers.Count > 0)
+                        try
                         {
-                            foreach (DteExpression member in expItem.DataMembers)
+                            int slot = (queueBegin + i) % effectiveCap;
+                            string itemExpr = $"{queueExpr}{op}Data[{slot}]";
+                            DteExpression expItem = SafeGetExpression(dte, itemExpr, 500);
+
+                            DteExpression expFlags = SafeGetExpression(dte, $"{itemExpr}.Flags", 500);
+                            string flagsVal = (expFlags != null && expFlags.IsValidValue) ? expFlags.Value : "0";
+                            string flagsDesc = flagsVal == "1" ? "Маркер параллелизма"
+                                             : flagsVal == "0" ? "Обычная задача"
+                                             : $"Флаги: {flagsVal}";
+
+                            var sbParams = new StringBuilder();
+                            var sbPreview = new StringBuilder();
+                            var sbDetails = new StringBuilder();
+
+                            sbDetails.AppendLine($"Задача плана #{i + 1} (Слот очереди: Data[{slot}])");
+                            sbDetails.AppendLine($"Целевая процедура: {activeProc}");
+                            sbDetails.AppendLine($"Статус / Флаги: {flagsDesc} (0x{flagsVal})");
+                            sbDetails.AppendLine("--- Параметры вызова ---");
+
+                            bool membersFound = false;
+                            try
                             {
-                                string mName = member.Name ?? "";
-                                if (string.IsNullOrEmpty(mName) || mName == "Flags") continue;
-                                membersFound = true;
-                                string mVal = member.Value ?? "";
-                                string mType = member.Type ?? "";
-
-                                sbDetails.AppendLine($"  {mType} {mName} = {mVal}");
-                                sbParams.Append($"{mName}={mVal}; ");
-
-                                if (mType.Contains("*") && mVal != "0x0000000000000000" && mVal != "0x00000000" && mVal != "0x0" && !mVal.Contains("NULL"))
+                                if (expItem != null && expItem.DataMembers != null && expItem.DataMembers.Count > 0)
                                 {
-                                    if (mType.Contains("**"))
+                                    foreach (DteExpression member in expItem.DataMembers)
                                     {
-                                        DteExpression deref1 = dte.Debugger.GetExpression($"*{itemExpr}.{mName}", false, 500);
-                                        if (deref1 != null && deref1.IsValidValue)
+                                        string mName = member.Name ?? "";
+                                        if (string.IsNullOrEmpty(mName) || mName == "Flags") continue;
+                                        membersFound = true;
+                                        string mVal = member.Value ?? "";
+                                        string mType = member.Type ?? "";
+
+                                        sbDetails.AppendLine($"  {mType} {mName} = {mVal}");
+                                        sbParams.Append($"{mName}={mVal}; ");
+
+                                        if (mType.Contains("*") && !IsNullOrZero(mVal))
                                         {
-                                            sbDetails.AppendLine($"    *{mName} -> {deref1.Value}");
-                                            DteExpression dataDeref = dte.Debugger.GetExpression($"(*{itemExpr}.{mName})->Data", false, 500);
-                                            if (dataDeref != null && dataDeref.IsValidValue)
+                                            if (mType.Contains("**"))
                                             {
-                                                sbDetails.AppendLine($"    (*{mName})->Data = {dataDeref.Value}");
-                                                sbPreview.Append($"*{mName}->Data={dataDeref.Value}; ");
+                                                DteExpression deref1 = SafeGetExpression(dte, $"*{itemExpr}.{mName}", 500);
+                                                if (deref1 != null && deref1.IsValidValue)
+                                                {
+                                                    string d1Val = deref1.Value ?? "";
+                                                    sbDetails.AppendLine($"    *{mName} -> {d1Val}");
+                                                    if (!IsNullOrZero(d1Val))
+                                                    {
+                                                        DteExpression dataDeref = SafeGetExpression(dte, $"(*{itemExpr}.{mName})->Data", 500);
+                                                        if (dataDeref != null && dataDeref.IsValidValue)
+                                                        {
+                                                            sbDetails.AppendLine($"    (*{mName})->Data = {dataDeref.Value}");
+                                                            sbPreview.Append($"*{mName}->Data={dataDeref.Value}; ");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                DteExpression dataDeref = SafeGetExpression(dte, $"{itemExpr}.{mName}->Data", 500);
+                                                if (dataDeref != null && dataDeref.IsValidValue)
+                                                {
+                                                    sbDetails.AppendLine($"    {mName}->Data = {dataDeref.Value}");
+                                                    sbPreview.Append($"{mName}->Data={dataDeref.Value}; ");
+                                                }
                                             }
                                         }
                                     }
-                                    else
+                                }
+                            }
+                            catch { }
+
+                            if (!membersFound || sbParams.Length == 0)
+                            {
+                                DteExpression expCur = SafeGetExpression(dte, $"{itemExpr}.Cur", 500);
+                                DteExpression expIns = SafeGetExpression(dte, $"{itemExpr}.Ins", 500);
+                                if (expCur != null && expCur.IsValidValue)
+                                {
+                                    string cVal = expCur.Value ?? "";
+                                    sbParams.Append($"Cur={cVal}; ");
+                                    sbDetails.AppendLine($"  TreeNode ** Cur = {cVal}");
+                                    if (!IsNullOrZero(cVal))
                                     {
-                                        DteExpression dataDeref = dte.Debugger.GetExpression($"{itemExpr}.{mName}->Data", false, 500);
-                                        if (dataDeref != null && dataDeref.IsValidValue)
+                                        DteExpression dCur = SafeGetExpression(dte, $"*{itemExpr}.Cur", 500);
+                                        if (dCur != null && dCur.IsValidValue)
                                         {
-                                            sbDetails.AppendLine($"    {mName}->Data = {dataDeref.Value}");
-                                            sbPreview.Append($"{mName}->Data={dataDeref.Value}; ");
+                                            string dCurVal = dCur.Value ?? "";
+                                            sbDetails.AppendLine($"    *Cur -> {dCurVal}");
+                                            if (!IsNullOrZero(dCurVal))
+                                            {
+                                                DteExpression dCurData = SafeGetExpression(dte, $"(*{itemExpr}.Cur)->Data", 500);
+                                                if (dCurData != null && dCurData.IsValidValue)
+                                                {
+                                                    sbDetails.AppendLine($"    (*Cur)->Data = {dCurData.Value}");
+                                                    sbPreview.Append($"*Cur->Data={dCurData.Value}; ");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (expIns != null && expIns.IsValidValue)
+                                {
+                                    string iVal = expIns.Value ?? "";
+                                    sbParams.Append($"Ins={iVal}; ");
+                                    sbDetails.AppendLine($"  TreeNode * Ins = {iVal}");
+                                    if (!IsNullOrZero(iVal))
+                                    {
+                                        DteExpression dInsData = SafeGetExpression(dte, $"{itemExpr}.Ins->Data", 500);
+                                        if (dInsData != null && dInsData.IsValidValue)
+                                        {
+                                            sbDetails.AppendLine($"    Ins->Data = {dInsData.Value}");
+                                            sbPreview.Append($"Ins->Data={dInsData.Value}; ");
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        if (!membersFound || sbParams.Length == 0)
-                        {
-                            DteExpression expCur = dte.Debugger.GetExpression($"{itemExpr}.Cur", false, 500);
-                            DteExpression expIns = dte.Debugger.GetExpression($"{itemExpr}.Ins", false, 500);
-                            if (expCur != null && expCur.IsValidValue)
+                            string finalParams = sbParams.Length > 0 ? sbParams.ToString().TrimEnd() : (expItem?.Value ?? $"Слот #{slot}");
+                            string finalPreview = sbPreview.Length > 0 ? sbPreview.ToString().TrimEnd() : (expItem?.Value ?? "В очереди плана");
+
+                            var taskItem = new PlanTaskItemModel
                             {
-                                string cVal = expCur.Value;
-                                sbParams.Append($"Cur={cVal}; ");
-                                sbDetails.AppendLine($"  TreeNode ** Cur = {cVal}");
-                                DteExpression dCur = dte.Debugger.GetExpression($"*{itemExpr}.Cur", false, 500);
-                                if (dCur != null && dCur.IsValidValue)
-                                {
-                                    sbDetails.AppendLine($"    *Cur -> {dCur.Value}");
-                                    DteExpression dCurData = dte.Debugger.GetExpression($"(*{itemExpr}.Cur)->Data", false, 500);
-                                    if (dCurData != null && dCurData.IsValidValue)
-                                    {
-                                        sbDetails.AppendLine($"    (*Cur)->Data = {dCurData.Value}");
-                                        sbPreview.Append($"*Cur->Data={dCurData.Value}; ");
-                                    }
-                                }
-                            }
-                            if (expIns != null && expIns.IsValidValue)
-                            {
-                                string iVal = expIns.Value;
-                                sbParams.Append($"Ins={iVal}; ");
-                                sbDetails.AppendLine($"  TreeNode * Ins = {iVal}");
-                                DteExpression dInsData = dte.Debugger.GetExpression($"{itemExpr}.Ins->Data", false, 500);
-                                if (dInsData != null && dInsData.IsValidValue)
-                                {
-                                    sbDetails.AppendLine($"    Ins->Data = {dInsData.Value}");
-                                    sbPreview.Append($"Ins->Data={dInsData.Value}; ");
-                                }
-                            }
+                                Index = i + 1,
+                                TargetFunction = activeProc,
+                                Parameters = finalParams,
+                                ValuesPreview = finalPreview,
+                                Flags = flagsDesc,
+                                Details = sbDetails.ToString()
+                            };
+                            _planTasks.Add(taskItem);
                         }
-
-                        string finalParams = sbParams.Length > 0 ? sbParams.ToString().TrimEnd() : (expItem?.Value ?? $"Слот #{slot}");
-                        string finalPreview = sbPreview.Length > 0 ? sbPreview.ToString().TrimEnd() : (expItem?.Value ?? "-");
-
-                        var taskItem = new PlanTaskItemModel
+                        catch (Exception ex)
                         {
-                            Index = i + 1,
-                            TargetFunction = activeProc,
-                            Parameters = finalParams,
-                            ValuesPreview = finalPreview,
-                            Flags = flagsDesc,
-                            Details = sbDetails.ToString()
-                        };
-                        _planTasks.Add(taskItem);
+                            _planTasks.Add(new PlanTaskItemModel
+                            {
+                                Index = i + 1,
+                                TargetFunction = activeProc,
+                                Parameters = $"Слот #{i}",
+                                ValuesPreview = "В очереди плана",
+                                Flags = "Обычная задача",
+                                Details = $"Задача #{i + 1}: {ex.Message}"
+                            });
+                        }
                     }
 
                     if (_planTasks.Count > 0)
                     {
                         GridPlanTasks.SelectedIndex = 0;
+                        if (MainTabControl != null)
+                        {
+                            MainTabControl.SelectedIndex = 1;
+                        }
                     }
                 }
 
@@ -832,6 +870,46 @@ namespace plcMSVCplugin
             {
                 AppendLog($"Ошибка отображения содержимого каналов: {ex.Message}");
             }
+        }
+
+        private static DteExpression? SafeGetExpression(DTE2 dte, string expr, int timeoutMs = 500)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try
+            {
+                return dte.Debugger?.GetExpression(expr, false, timeoutMs);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool IsNullOrZero(string? val)
+        {
+            if (string.IsNullOrWhiteSpace(val)) return true;
+            string v = val.Trim();
+            return v == "0" || v == "0x0" || v == "0x00000000" || v == "0x0000000000000000" ||
+                   v.Equals("NULL", StringComparison.OrdinalIgnoreCase) ||
+                   v.Equals("nullptr", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool TryParseIntFlexible(string val, out int result)
+        {
+            result = 0;
+            if (string.IsNullOrWhiteSpace(val)) return false;
+            val = val.Trim();
+            if (val.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                return int.TryParse(val.Substring(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out result);
+            }
+            int spaceIdx = val.IndexOf(' ');
+            if (spaceIdx > 0)
+            {
+                string firstPart = val.Substring(0, spaceIdx);
+                if (TryParseIntFlexible(firstPart, out result)) return true;
+            }
+            return int.TryParse(val, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out result);
         }
     }
 }

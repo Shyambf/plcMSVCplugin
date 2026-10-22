@@ -331,7 +331,7 @@
         </Border>
 
         <!-- Вкладки инспектора -->
-        <TabControl Grid.Row="1" Background="Transparent"
+        <TabControl x:Name="MainTabControl" Grid.Row="1" Background="Transparent"
                     BorderBrush="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowBorderBrushKey}}">
 
             <!-- Вкладка 1: Потоки и стадии -->
@@ -411,7 +411,7 @@
                     <!-- Содержимое очереди плана и параметров задач -->
                     <Grid Grid.Row="1">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="1.3*" />
+                            <RowDefinition Height="1.3*" MinHeight="100" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="1*" />
                         </Grid.RowDefinitions>
@@ -421,7 +421,14 @@
                             <DataGrid x:Name="GridPlanTasks" AutoGenerateColumns="False" IsReadOnly="True"
                                       HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                                       SelectionMode="Single" SelectionChanged="GridPlanTasks_SelectionChanged"
-                                      Background="Transparent">
+                                      MinHeight="80" Background="Transparent">
+                                <DataGrid.Resources>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:EnvironmentColors.ToolWindowTextBrushKey}}" />
+                                        <Setter Property="VerticalAlignment" Value="Center" />
+                                        <Setter Property="Margin" Value="4,2" />
+                                    </Style>
+                                </DataGrid.Resources>
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="№" Binding="{Binding Index}" Width="45" />
                                     <DataGridTextColumn Header="Процедура / Функция" Binding="{Binding TargetFunction}" Width="150" />

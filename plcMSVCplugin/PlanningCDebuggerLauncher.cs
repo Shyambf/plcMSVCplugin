@@ -349,12 +349,31 @@ namespace plcMSVCplugin
                         }
                     }
 
+                    // Карта строк объявлений планируемых процедур (reenterable Name(...))
+                    var procStartLineMap = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+                    var reentRegex = new System.Text.RegularExpressions.Regex(@"reenterable(?:\[[^\]]*\])?(?:\s+(?:static|global|reent_in|funneled_in|funneled_out))*\s+([A-Za-z0-9_]+)\s*\(", System.Text.RegularExpressions.RegexOptions.Compiled);
+                    for (int sIdx = 0; sIdx < srcLines.Length; sIdx++)
+                    {
+                        var m = reentRegex.Match(srcLines[sIdx]);
+                        if (m.Success)
+                        {
+                            string pName = m.Groups[1].Value;
+                            if (!procStartLineMap.ContainsKey(pName))
+                            {
+                                procStartLineMap[pName] = sIdx + 1;
+                            }
+                        }
+                    }
+
                     var cleanLines = new System.Collections.Generic.List<string>(rawLines.Length + 100);
                     string normalizedSourceFile = Path.GetFullPath(sourceFile).Replace('\\', '/');
                     string sourceFileNameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile);
 
                     bool inCallFunc = false;
+                    bool pendingCallBody = false;
+                    int callBraceDepth = 0;
                     int callFuncFirstLine = 0;
+                    bool inVirtualMacro = false;
 
                     for (int i = 0; i < rawLines.Length; i++)
                     {
@@ -363,7 +382,22 @@ namespace plcMSVCplugin
 
                         if (lineTrim.StartsWith("void _call_", StringComparison.Ordinal) && !lineTrim.EndsWith(";"))
                         {
-                            inCallFunc = true;
+                            pendingCallBody = true;
+                            callBraceDepth = 0;
+                        }
+
+                        // Привязка диспетчера inline void __Foo__ к строке заголовка Foo
+                        if (lineTrim.StartsWith("inline void __", StringComparison.Ordinal) && lineTrim.Contains("__("))
+                        {
+                            var mDisp = System.Text.RegularExpressions.Regex.Match(lineTrim, @"inline\s+void\s+__([A-Za-z0-9_]+)__\(");
+                            if (mDisp.Success)
+                            {
+                                string dispName = mDisp.Groups[1].Value;
+                                if (procStartLineMap.TryGetValue(dispName, out int pLine))
+                                {
+                                    cleanLines.Add($"#line {pLine} \"{normalizedSourceFile}\"");
+                                }
+                            }
                         }
 
                         if (line.StartsWith("#line ", StringComparison.Ordinal))
@@ -384,8 +418,11 @@ namespace plcMSVCplugin
                                     pathPart.IndexOf('[') >= 0 || pathPart.IndexOf(']') >= 0 ||
                                     pathPart.IndexOf('\n') >= 0 || pathPart.IndexOf('\r') >= 0)
                                 {
+                                    inVirtualMacro = true;
                                     continue;
                                 }
+
+                                inVirtualMacro = false;
 
                                 // Заменяем ссылки на .bak или временные имена на реальный исходник
                                 if (pathPart.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
@@ -400,7 +437,7 @@ namespace plcMSVCplugin
                                 }
 
                                 // Отслеживаем номер строки начала функции _call_
-                                if (inCallFunc && callFuncFirstLine == 0)
+                                if (pendingCallBody && callFuncFirstLine == 0)
                                 {
                                     string[] parts = prefix.Trim().Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                                     if (parts.Length >= 2 && int.TryParse(parts[1], out int lineNum))
@@ -419,29 +456,73 @@ namespace plcMSVCplugin
                             }
                         }
 
-                        // Точка перед первым исполняемым оператором процедуры (после lambda-инициализаций)
-                        if (inCallFunc && line.Contains("__dummy_counter += 713;"))
+                        // Начало тела функции _call_
+                        if (pendingCallBody && line.Contains("{"))
                         {
-                            cleanLines.Add(line);
-                            if (callFuncFirstLine > 0)
+                            inCallFunc = true;
+                            pendingCallBody = false;
+                            callBraceDepth = 0;
+                        }
+
+                        if (inCallFunc)
+                        {
+                            for (int cIdx = 0; cIdx < line.Length; cIdx++)
                             {
-                                cleanLines.Add($"#line {callFuncFirstLine + 1} \"{normalizedSourceFile}\"");
+                                char c = line[cIdx];
+                                if (c == '{') callBraceDepth++;
+                                else if (c == '}') callBraceDepth--;
                             }
-                            continue;
+
+                            // Точка перед первым исполняемым оператором процедуры (после lambda-инициализаций)
+                            if (line.Contains("__dummy_counter += 713;"))
+                            {
+                                cleanLines.Add(line);
+                                if (callFuncFirstLine > 0)
+                                {
+                                    cleanLines.Add($"#line {callFuncFirstLine + 1} \"{normalizedSourceFile}\"");
+                                }
+                                continue;
+                            }
+
+                            // Выход из процедуры _call_: глубина фигурных скобок вернулась в 0
+                            if (callBraceDepth == 0)
+                            {
+                                cleanLines.Add(line);
+                                inCallFunc = false;
+                                callFuncFirstLine = 0;
+                                cleanLines.Add("#line 1 \"planning_c_internal.h\"");
+                                continue;
+                            }
                         }
 
-                        // Выход из процедуры _call_: изолируем последующие служебные функции (__soft_atomic_, __atomic_)
-                        if (inCallFunc && line.StartsWith("}", StringComparison.Ordinal))
+                        // Безусловная изоляция служебных процедур __soft_atomic_ и __atomic_
+                        if (lineTrim.StartsWith("void __soft_atomic_", StringComparison.Ordinal) || lineTrim.StartsWith("void __atomic_", StringComparison.Ordinal))
                         {
+                            if (cleanLines.Count == 0 || cleanLines[cleanLines.Count - 1] != "#line 1 \"planning_c_internal.h\"")
+                            {
+                                cleanLines.Add("#line 1 \"planning_c_internal.h\"");
+                            }
                             cleanLines.Add(line);
-                            inCallFunc = false;
-                            callFuncFirstLine = 0;
-                            cleanLines.Add("#line 1 \"planning_c_internal.h\"");
                             continue;
                         }
 
-                        // Если оператор внутри макроса точно совпадает со строкой пользовательского кода, восстанавливаем директиву #line
-                        if (srcLineMap.TryGetValue(lineTrim, out int mappedSourceLine))
+                        // Цикл диспетчера: при вызове следующей запланированной задачи возвращаем указатель на заголовок процедуры
+                        if (lineTrim.StartsWith("while (val__continue_plan__", StringComparison.Ordinal) || (lineTrim.StartsWith("_call_", StringComparison.Ordinal) && lineTrim.Contains("val__continue_plan__")))
+                        {
+                            var mProc = System.Text.RegularExpressions.Regex.Match(lineTrim, @"_call_([A-Za-z0-9_]+)\(") ??
+                                        System.Text.RegularExpressions.Regex.Match(lineTrim, @"_events_([A-Za-z0-9_]+)__LOC__");
+                            if (mProc != null && mProc.Success)
+                            {
+                                string pName = mProc.Groups[1].Value;
+                                if (procStartLineMap.TryGetValue(pName, out int pLine))
+                                {
+                                    cleanLines.Add($"#line {pLine} \"{normalizedSourceFile}\"");
+                                }
+                            }
+                        }
+
+                        // Внутри развернутых виртуальных макросов (например while_else) восстанавливаем директивы #line
+                        if (inVirtualMacro && srcLineMap.TryGetValue(lineTrim, out int mappedSourceLine))
                         {
                             string expectedDirective = $"#line {mappedSourceLine} \"{normalizedSourceFile}\"";
                             if (cleanLines.Count == 0 || cleanLines[cleanLines.Count - 1] != expectedDirective)
