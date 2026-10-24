@@ -8,7 +8,7 @@
 
 Язык Planning C строится поверх стандартного C/C++ (ISO C99/C11 / C++). Вся разработка и примеры ведутся непосредственно в стандартных файлах **`.cpp`** (и `.h`).
 
-В плагине используется **нативный MEF-классификатор (`PlanningCClassifier.cs`)**:
+В плагине используется **нативный MEF-классификатор ([`PlanningCClassifier.cs`](plcMSVCplugin/Editor/PlanningCClassifier.cs))**:
 - Он напрямую подключается к встроенному редактору C/C++ Visual Studio (`Source Code Editor`);
 - Все ключевые слова, типы данных и правила вынесены в конфигурационный файл — [`plcMSVCplugin/syntax_rules.json`](plcMSVCplugin/syntax_rules.json);
 - Чтобы добавить или изменить слова, **не нужно модифицировать исходный C#-код и регулярные выражения**.
@@ -81,7 +81,7 @@
 - `preprocessor` $\rightarrow$ Фиолетовый / Синий (директивы `#...`)
 - `russianKeywords` $\rightarrow$ Синий (действия)
 
-Если требуется создать принципиально новую категорию токенов, привязка к системным цветам Visual Studio задается в конструкторе `PlanningCClassifier` в [`PlanningCClassifier.cs`](plcMSVCplugin/PlanningCClassifier.cs).
+Если требуется создать принципиально новую категорию токенов, привязка к системным цветам Visual Studio задается в конструкторе `PlanningCClassifier` в [`PlanningCClassifier.cs`](plcMSVCplugin/Editor/PlanningCClassifier.cs).
 
 ---
 
