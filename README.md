@@ -196,7 +196,6 @@ plcMSVCplugin/
 ├── README.md                         # Главная документация проекта, функционал и горячие клавиши
 ├── INSTALL.md                        # Инструкция по установке и настройке IntelliSense
 ├── MANUAL.md                         # Руководство по добавлению ключевых слов через JSON
-├── RELEASE_NOTES.md                  # История версий и список изменений
 └── plcMSVCplugin/
     ├── Build/
     │   ├── PlanningCDebuggerLauncher.cs   # Оркестратор сборки и запуска нативного отладчика Visual Studio
